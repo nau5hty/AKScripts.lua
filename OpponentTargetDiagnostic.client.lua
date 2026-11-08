@@ -16,7 +16,7 @@ end
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local GUI_NAME = "AXOpponentTargetDiagnostic"
 local SCAN_RADIUS = 150
-local MAX_ROWS = 12
+local MAX_ROWS = 20
 
 local oldGui = PlayerGui:FindFirstChild(GUI_NAME)
 if oldGui then
@@ -213,26 +213,51 @@ local function getNearbyCharacters()
 
     for _, object in ipairs(Workspace:GetDescendants()) do
         if object:IsA("Model") and object ~= localCharacter and not seen[object] then
+            local player = Players:GetPlayerFromCharacter(object)
             local humanoid = object:FindFirstChildWhichIsA("Humanoid", true)
             local animationController = object:FindFirstChildWhichIsA("AnimationController", true)
+            local animator = object:FindFirstChildWhichIsA("Animator", true)
             local root = findModelRoot(object)
 
-            -- Include normal humanoid rigs and animation-controller rigs.
-            if root and root:IsA("BasePart") and (humanoid or animationController) then
+            -- Fallback to the model pivot when it has no conventional root part.
+            local position
+            if root then
+                position = root.Position
+            else
+                local ok, pivot = pcall(function()
+                    return object:GetPivot()
+                end)
+                if ok and pivot then
+                    position = pivot.Position
+                end
+            end
+
+            local partCount = 0
+            for _, descendant in ipairs(object:GetDescendants()) do
+                if descendant:IsA("BasePart") then
+                    partCount = partCount + 1
+                end
+            end
+
+            -- Include character rigs and otherwise unknown nearby models.
+            if position and partCount >= 3 then
                 local alive = not humanoid or humanoid.Health > 0
-                local distance = (root.Position - localRoot.Position).Magnitude
+                local distance = (position - localRoot.Position).Magnitude
 
                 if alive and distance <= SCAN_RADIUS then
                     seen[object] = true
-                    local player = Players:GetPlayerFromCharacter(object)
                     local kind
 
                     if player then
                         kind = "PLAYER"
                     elseif humanoid then
                         kind = "NPC/HUMANOID"
-                    else
+                    elseif animationController then
                         kind = "NPC/ANIMATIONCONTROLLER"
+                    elseif animator then
+                        kind = "MODEL/ANIMATOR"
+                    else
+                        kind = "MODEL/UNKNOWN"
                     end
 
                     local healthText = "--"
@@ -246,12 +271,14 @@ local function getNearbyCharacters()
                     end
 
                     table.insert(found, {
-                        model = object.Name,
+                        model = object:GetFullName(),
                         display = displayName,
                         kind = kind,
                         distance = distance,
                         health = healthText,
-                        maxHealth = maxHealthText
+                        maxHealth = maxHealthText,
+                        parts = partCount,
+                        hasAnimator = animator ~= nil
                     })
                 end
             end
@@ -293,13 +320,15 @@ local function refresh()
         for index = 1, math.min(#characters, MAX_ROWS) do
             local item = characters[index]
             local line = string.format(
-                "%d) %s | %s | %.0f studs | HP %s/%s",
+                "%d) %s | %s | %.0f studs | HP %s/%s | Parts %d | Animator %s",
                 index,
                 item.model,
                 item.kind,
                 item.distance,
                 item.health,
-                item.maxHealth
+                item.maxHealth,
+                item.parts,
+                item.hasAnimator and "YES" or "NO"
             )
             if item.display ~= "" and item.display ~= item.model then
                 line = line .. " | Display: " .. item.display
