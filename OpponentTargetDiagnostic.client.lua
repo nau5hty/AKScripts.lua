@@ -179,6 +179,8 @@ local function readUpperRightHudText()
 end
 
 
+local findModelRoot
+
 local function readOverheadNameLabels()
     local roster = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -261,7 +263,7 @@ local function readOverheadNameLabels()
     return entries
 end
 
-local function findModelRoot(model)
+findModelRoot = function(model)
     local rootNames = {
         "HumanoidRootPart",
         "RootPart",
