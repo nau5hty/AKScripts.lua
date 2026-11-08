@@ -189,6 +189,20 @@ local detectorStartButton = nil
 local detectorDragConnections = {}
 local RefreshAnimationDetectorPanel = function() end
 
+-- Read-only HUD monitor state; kept separate from the animation detector.
+local hudMonitorEnabled = false
+local hudMonitorElapsed = 0
+local hudMonitorPanel = nil
+local hudMonitorStatusLabel = nil
+local hudMonitorFighterLabel = nil
+local hudMonitorTimerLabel = nil
+local hudMonitorHPLabel = nil
+local hudMonitorHeartsLabel = nil
+local hudMonitorExtraLabel = nil
+local hudMonitorHistoryLabel = nil
+local hudMonitorPrevious = nil
+local hudMonitorHistory = {}
+
 local function IsOpponentCharacter(player, character)
     if player == nil
         or player == LocalPlayer
@@ -1120,6 +1134,333 @@ RefreshAnimationDetectorPanel = function()
 end
 CreateAnimationDetectorPanel()
 
+
+local function HUDCleanText(value)
+    local textValue = tostring(value or "")
+    textValue = textValue:gsub("<[^>]->", "")
+    textValue = textValue:gsub("[%c]", " ")
+    return textValue:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function HUDIsTimer(value)
+    return tostring(value or ""):match("^%d+:%d%d$") ~= nil
+end
+
+local function HUDIsVisible(object)
+    local current = object
+    while current and current ~= PlayerGui do
+        if current:IsA("GuiObject") and not current.Visible then
+            return false
+        end
+        if current:IsA("ScreenGui") and not current.Enabled then
+            return false
+        end
+        current = current.Parent
+    end
+    return true
+end
+
+local function HUDIsTopRight(object)
+    local currentCamera = Workspace.CurrentCamera
+    if not currentCamera then
+        return false
+    end
+
+    local view = currentCamera.ViewportSize
+    local pos = object.AbsolutePosition
+    local size = object.AbsoluteSize
+    return pos.X + size.X / 2 >= view.X * 0.48
+        and pos.Y + size.Y / 2 <= view.Y * 0.58
+end
+
+local function HUDGetScreenGui(object)
+    local current = object
+    while current and current ~= PlayerGui do
+        if current:IsA("ScreenGui") then
+            return current
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+local function HUDScreenDistance(a, b)
+    local ap = a.AbsolutePosition + a.AbsoluteSize / 2
+    local bp = b.AbsolutePosition + b.AbsoluteSize / 2
+    return (ap - bp).Magnitude
+end
+
+local function HUDCountHearts(raw)
+    local _, count = tostring(raw or ""):gsub("♥", "")
+    return count
+end
+
+local function HUDGetSnapshot()
+    local timerCandidates = {}
+
+    for _, object in ipairs(PlayerGui:GetDescendants()) do
+        if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+            and HUDIsVisible(object) and HUDIsTopRight(object) then
+            local value = HUDCleanText(object.Text)
+            if HUDIsTimer(value) then
+                table.insert(timerCandidates, {
+                    object = object,
+                    value = value,
+                    score = string.lower(object.Name) == "time" and 5 or 0
+                })
+            end
+        end
+    end
+
+    if #timerCandidates == 0 then
+        return nil
+    end
+
+    local allObjects = PlayerGui:GetDescendants()
+    local best = nil
+
+    for _, timerCandidate in ipairs(timerCandidates) do
+        local timerObject = timerCandidate.object
+        local timerScreen = HUDGetScreenGui(timerObject)
+        local snapshot = {
+            timer = timerCandidate.value,
+            fighter = nil,
+            hp = {},
+            heartsLeft = nil,
+            heartsRight = nil,
+            extra = nil,
+            score = timerCandidate.score
+        }
+
+        local names = {}
+        local hpValues = {}
+        local extras = {}
+
+        for _, object in ipairs(allObjects) do
+            if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+                and object ~= timerObject and HUDIsVisible(object) then
+                local distance = HUDScreenDistance(object, timerObject)
+                if distance <= 900 then
+                    local raw = tostring(object.Text or "")
+                    local value = HUDCleanText(raw)
+                    local name = string.lower(object.Name)
+                    local proximity = (HUDGetScreenGui(object) == timerScreen and 250 or 0) - distance
+
+                    if name == "name" and value ~= "" and not HUDIsTimer(value) then
+                        table.insert(names, {value = value, score = proximity})
+                    elseif name == "hpnum" and tonumber(value) then
+                        table.insert(hpValues, {value = value, score = proximity, x = object.AbsolutePosition.X, y = object.AbsolutePosition.Y})
+                    elseif name == "heartsl" and value ~= "" then
+                        local hearts = HUDCountHearts(raw)
+                        if snapshot.heartsLeft == nil then
+                            snapshot.heartsLeft = hearts
+                        end
+                    elseif name == "heartsr" and value ~= "" then
+                        local hearts = HUDCountHearts(raw)
+                        if snapshot.heartsRight == nil then
+                            snapshot.heartsRight = hearts
+                        end
+                    elseif name == "label" and value ~= "" then
+                        table.insert(extras, {value = value, score = proximity})
+                    end
+                end
+            end
+        end
+
+        table.sort(names, function(a, b) return a.score > b.score end)
+        table.sort(hpValues, function(a, b)
+            if a.y == b.y then return a.x < b.x end
+            return a.y < b.y
+        end)
+        table.sort(extras, function(a, b) return a.score > b.score end)
+
+        if names[1] then
+            snapshot.fighter = names[1].value
+            snapshot.score += 10
+        end
+
+        for index = 1, math.min(2, #hpValues) do
+            table.insert(snapshot.hp, hpValues[index].value)
+        end
+
+        if #snapshot.hp >= 2 then
+            snapshot.score += 4
+        elseif #snapshot.hp == 1 then
+            snapshot.score += 1
+        end
+
+        if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
+            snapshot.score += 2
+        end
+
+        snapshot.extra = extras[1] and extras[1].value or nil
+
+        if snapshot.score > (best and best.score or -1) then
+            best = snapshot
+        end
+    end
+
+    return best
+end
+
+local function HUDAddHistory(message)
+    if hudMonitorHistory[1] == message then
+        return
+    end
+    table.insert(hudMonitorHistory, 1, message)
+    while #hudMonitorHistory > 3 do
+        table.remove(hudMonitorHistory)
+    end
+    hudMonitorHistoryLabel.Text = table.concat(hudMonitorHistory, "\\n")
+end
+
+local function HUDClearValues()
+    hudMonitorStatusLabel.Text = "LOBBY | VALUES NIL"
+    hudMonitorStatusLabel.BackgroundColor3 = Color3.fromRGB(43, 49, 61)
+    hudMonitorFighterLabel.Text = "Fighter: nil"
+    hudMonitorTimerLabel.Text = "Timer: nil"
+    hudMonitorHPLabel.Text = "HUD HP: nil / nil"
+    hudMonitorHeartsLabel.Text = "Hearts: nil"
+    hudMonitorExtraLabel.Text = "Other HUD label: nil"
+
+    if hudMonitorPrevious then
+        hudMonitorPrevious = nil
+        hudMonitorHistory = {}
+        hudMonitorHistoryLabel.Text = "Waiting for match data..."
+    end
+end
+
+local function HUDRefresh()
+    if not hudMonitorPanel then
+        return
+    end
+
+    local snapshot = HUDGetSnapshot()
+    local matchActive = snapshot ~= nil
+        and snapshot.fighter ~= nil
+        and #snapshot.hp >= 2
+
+    if not matchActive then
+        HUDClearValues()
+        return
+    end
+
+    hudMonitorStatusLabel.Text = "MATCH HUD DETECTED"
+    hudMonitorStatusLabel.BackgroundColor3 = Color3.fromRGB(35, 91, 67)
+    hudMonitorFighterLabel.Text = "Fighter: " .. snapshot.fighter
+    hudMonitorTimerLabel.Text = "Timer: " .. (snapshot.timer or "nil")
+    hudMonitorHPLabel.Text = "HUD HP: " .. (snapshot.hp[1] or "nil")
+        .. " / " .. (snapshot.hp[2] or "nil")
+
+    if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
+        hudMonitorHeartsLabel.Text = "Hearts: " .. tostring(snapshot.heartsLeft or "nil")
+            .. " / " .. tostring(snapshot.heartsRight or "nil")
+    else
+        hudMonitorHeartsLabel.Text = "Hearts: nil"
+    end
+
+    hudMonitorExtraLabel.Text = "Other HUD label: " .. (snapshot.extra or "nil")
+
+    if not hudMonitorPrevious then
+        hudMonitorHistory = {}
+        hudMonitorHistoryLabel.Text = "Match data detected."
+        HUDAddHistory("Match detected | " .. snapshot.fighter)
+    else
+        if snapshot.fighter ~= hudMonitorPrevious.fighter then
+            HUDAddHistory("Fighter: " .. snapshot.fighter)
+        end
+        if snapshot.hp[1] ~= hudMonitorPrevious.hp[1]
+            or snapshot.hp[2] ~= hudMonitorPrevious.hp[2] then
+            HUDAddHistory("HP: " .. (snapshot.hp[1] or "nil")
+                .. " / " .. (snapshot.hp[2] or "nil"))
+        end
+        if snapshot.heartsLeft ~= hudMonitorPrevious.heartsLeft
+            or snapshot.heartsRight ~= hudMonitorPrevious.heartsRight then
+            if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
+                HUDAddHistory("Hearts: " .. tostring(snapshot.heartsLeft or "nil")
+                    .. " / " .. tostring(snapshot.heartsRight or "nil"))
+            end
+        end
+    end
+
+    hudMonitorPrevious = snapshot
+end
+
+local function CreateHUDMonitorPanel()
+    if hudMonitorPanel then
+        return
+    end
+
+    hudMonitorPanel = Instance.new("Frame")
+    hudMonitorPanel.Name = "OpponentHUDMonitorPanel"
+    hudMonitorPanel.Size = UDim2.fromOffset(320, 225)
+    hudMonitorPanel.Position = UDim2.new(1, -334, 1, -240)
+    hudMonitorPanel.BackgroundColor3 = Color3.fromRGB(19, 21, 27)
+    hudMonitorPanel.BorderSizePixel = 0
+    hudMonitorPanel.Visible = false
+    hudMonitorPanel.Parent = ProtectedGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = hudMonitorPanel
+
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.fromRGB(74, 82, 99)
+    outline.Thickness = 1
+    outline.Parent = hudMonitorPanel
+
+    local title = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Title", "AXScripts | Opponent HUD Monitor",
+        UDim2.fromOffset(10, 6), UDim2.new(1, -20, 0, 22), 12
+    )
+    title.Font = Enum.Font.GothamBold
+
+    hudMonitorStatusLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Status", "LOBBY | VALUES NIL",
+        UDim2.fromOffset(10, 32), UDim2.new(1, -20, 0, 20), 10
+    )
+    hudMonitorStatusLabel.BackgroundColor3 = Color3.fromRGB(43, 49, 61)
+    hudMonitorStatusLabel.BackgroundTransparency = 0
+    hudMonitorStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    hudMonitorFighterLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Fighter", "Fighter: nil",
+        UDim2.fromOffset(10, 58), UDim2.new(1, -20, 0, 18), 11
+    )
+    hudMonitorTimerLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Timer", "Timer: nil",
+        UDim2.fromOffset(10, 78), UDim2.new(1, -20, 0, 18), 11
+    )
+    hudMonitorHPLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "HP", "HUD HP: nil / nil",
+        UDim2.fromOffset(10, 98), UDim2.new(1, -20, 0, 18), 11
+    )
+    hudMonitorHeartsLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Hearts", "Hearts: nil",
+        UDim2.fromOffset(10, 118), UDim2.new(1, -20, 0, 18), 11
+    )
+    hudMonitorExtraLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Extra", "Other HUD label: nil",
+        UDim2.fromOffset(10, 138), UDim2.new(1, -20, 0, 18), 11
+    )
+
+    local recentTitle = CreateDetectorPanelLabel(
+        hudMonitorPanel, "RecentTitle", "RECENT HUD CHANGES",
+        UDim2.fromOffset(10, 160), UDim2.new(1, -20, 0, 14), 9
+    )
+    recentTitle.Font = Enum.Font.GothamBold
+    recentTitle.TextColor3 = Color3.fromRGB(153, 173, 201)
+
+    hudMonitorHistoryLabel = CreateDetectorPanelLabel(
+        hudMonitorPanel, "Recent", "Waiting for match data...",
+        UDim2.fromOffset(10, 176), UDim2.new(1, -20, 0, 42), 9
+    )
+    hudMonitorHistoryLabel.Font = Enum.Font.Code
+    hudMonitorHistoryLabel.TextYAlignment = Enum.TextYAlignment.Top
+end
+
+CreateHUDMonitorPanel()
+
 local function CountPracticeDummies()
     local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -1192,6 +1533,19 @@ local function RunAutoFight()
 end
 
 local monitorConnection = RunService.Heartbeat:Connect(function(deltaTime)
+    if hudMonitorEnabled then
+        hudMonitorElapsed += deltaTime
+        if hudMonitorElapsed >= 0.3 then
+            hudMonitorElapsed = 0
+            local ok, err = pcall(HUDRefresh)
+            if not ok and hudMonitorStatusLabel then
+                hudMonitorStatusLabel.Text = "HUD READ ERROR"
+                hudMonitorStatusLabel.TextColor3 = Color3.fromRGB(255, 130, 130)
+                warn("[AXScripts HUD Monitor] " .. tostring(err))
+            end
+        end
+    end
+
     if npcMonitorEnabled then
         npcMonitorElapsed += deltaTime
         if npcMonitorElapsed >= 1 then
@@ -1374,6 +1728,37 @@ local buildOk, buildError = xpcall(function()
                 Title = "Animation Detector",
                 Message = GetAnimationDetectorStatus()
             })
+        end,
+    })
+
+    local HUDMonitorSection = FarmTab:CreateSection({Name = "Opponent HUD Monitor (Read Only)"})
+
+    HUDMonitorSection:CreateToggle({
+        Name = "Enable HUD Monitor",
+        Default = false,
+        Callback = function(state)
+            hudMonitorEnabled = state
+            hudMonitorElapsed = 1
+
+            if hudMonitorPanel then
+                hudMonitorPanel.Visible = state
+            end
+
+            if state then
+                HUDRefresh()
+                LucidUI:Notify({
+                    Title = "HUD Monitor",
+                    Message = "Read-only HUD monitoring enabled. Values remain nil in the lobby."
+                })
+            else
+                if hudMonitorStatusLabel then
+                    HUDClearValues()
+                end
+                LucidUI:Notify({
+                    Title = "HUD Monitor",
+                    Message = "HUD monitoring disabled."
+                })
+            end
         end,
     })
 
