@@ -178,12 +178,31 @@ local function readUpperRightHudText()
     return lines
 end
 
+local function findModelRoot(model)
+    local rootNames = {
+        "HumanoidRootPart",
+        "RootPart",
+        "Torso",
+        "UpperTorso"
+    }
+
+    if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+        return model.PrimaryPart
+    end
+
+    for _, rootName in ipairs(rootNames) do
+        local part = model:FindFirstChild(rootName, true)
+        if part and part:IsA("BasePart") then
+            return part
+        end
+    end
+
+    return nil
+end
+
 local function getNearbyCharacters()
     local localCharacter = LocalPlayer.Character
-    local localRoot = localCharacter and (
-        localCharacter:FindFirstChild("HumanoidRootPart")
-        or localCharacter.PrimaryPart
-    )
+    local localRoot = localCharacter and findModelRoot(localCharacter)
 
     if not localRoot then
         return {}, "Your character root part was not found."
@@ -194,26 +213,45 @@ local function getNearbyCharacters()
 
     for _, object in ipairs(Workspace:GetDescendants()) do
         if object:IsA("Model") and object ~= localCharacter and not seen[object] then
-            local humanoid = object:FindFirstChildOfClass("Humanoid")
-            local root = object:FindFirstChild("HumanoidRootPart")
-                or object.PrimaryPart
-                or object:FindFirstChild("Torso")
+            local humanoid = object:FindFirstChildWhichIsA("Humanoid", true)
+            local animationController = object:FindFirstChildWhichIsA("AnimationController", true)
+            local root = findModelRoot(object)
 
-            if humanoid and root and root:IsA("BasePart") and humanoid.Health > 0 then
+            -- Include normal humanoid rigs and animation-controller rigs.
+            if root and root:IsA("BasePart") and (humanoid or animationController) then
+                local alive = not humanoid or humanoid.Health > 0
                 local distance = (root.Position - localRoot.Position).Magnitude
-                if distance <= SCAN_RADIUS then
+
+                if alive and distance <= SCAN_RADIUS then
                     seen[object] = true
                     local player = Players:GetPlayerFromCharacter(object)
-                    local kind = player and "PLAYER" or "NPC/UNKNOWN"
-                    local displayName = humanoid.DisplayName
+                    local kind
+
+                    if player then
+                        kind = "PLAYER"
+                    elseif humanoid then
+                        kind = "NPC/HUMANOID"
+                    else
+                        kind = "NPC/ANIMATIONCONTROLLER"
+                    end
+
+                    local healthText = "--"
+                    local maxHealthText = "--"
+                    local displayName = ""
+
+                    if humanoid then
+                        healthText = string.format("%.0f", humanoid.Health)
+                        maxHealthText = string.format("%.0f", humanoid.MaxHealth)
+                        displayName = humanoid.DisplayName or ""
+                    end
 
                     table.insert(found, {
                         model = object.Name,
                         display = displayName,
                         kind = kind,
                         distance = distance,
-                        health = humanoid.Health,
-                        maxHealth = humanoid.MaxHealth
+                        health = healthText,
+                        maxHealth = maxHealthText
                     })
                 end
             end
@@ -245,7 +283,7 @@ local function refresh()
     end
 
     table.insert(lines, "")
-    table.insert(lines, "NEARBY LIVE CHARACTERS (nearest first):")
+    table.insert(lines, "NEARBY PLAYER/NPC RIGS (nearest first):")
     local characters, err = getNearbyCharacters()
     if err then
         table.insert(lines, "  " .. err)
@@ -255,7 +293,7 @@ local function refresh()
         for index = 1, math.min(#characters, MAX_ROWS) do
             local item = characters[index]
             local line = string.format(
-                "%d) %s | %s | %.0f studs | HP %.0f/%.0f",
+                "%d) %s | %s | %.0f studs | HP %s/%s",
                 index,
                 item.model,
                 item.kind,
