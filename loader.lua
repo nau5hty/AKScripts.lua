@@ -4,6 +4,7 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
@@ -62,15 +63,16 @@ end
 
 SetDiagnostic("LucidUI loaded; creating window")
 
--- Choose a compact window size from the current device viewport.
+-- Detect touch devices directly so landscape phones are still treated as mobile.
 local camera = Workspace.CurrentCamera
 local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-local isSmallScreen = viewport.X < 700
-local windowWidth = isSmallScreen
-    and math.floor(math.clamp(viewport.X * 0.88, 280, 380))
+local isMobile = UserInputService.TouchEnabled
+
+local windowWidth = isMobile
+    and math.floor(math.clamp(viewport.X * 0.88, 300, 380))
     or 620
-local windowHeight = isSmallScreen
-    and math.floor(math.clamp(viewport.Y * 0.72, 300, 520))
+local windowHeight = isMobile
+    and math.floor(math.clamp(viewport.Y * 0.72, 320, 460))
     or 460
 
 local windowOk, Window = pcall(function()
@@ -84,7 +86,6 @@ local windowOk, Window = pcall(function()
     window:BuildSettingsPanel()
     return window
 end)
-
 if not windowOk or not Window then
     SetDiagnostic("window setup failed: " .. tostring(Window))
     return
