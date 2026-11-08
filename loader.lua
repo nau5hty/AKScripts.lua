@@ -38,7 +38,7 @@ SetDiagnostic("loading LucidUI")
 
 local loaded, LucidUI = pcall(function()
     return loadstring(game:HttpGet(
-        "https://raw.githubusercontent.com/Kyotaah/lucidui/main/dist/lucidui.lua"
+        "https://raw.githubusercontent.com/Kyotaah/lucidui/f6af2839dcba9cc9e1288af293f9c01bb912d671/dist/lucidui.lua"
     ))()
 end)
 
@@ -131,6 +131,8 @@ local npcMonitorEnabled = false
 local npcMonitorElapsed = 0
 local npcCount = 0
 local attackRange = 7
+-- Tag practice NPC models with this in an owned Studio place.
+local PRACTICE_DUMMY_TAG = "AXPracticeDummy"
 
 -- Auto Fight only targets NPCs/dummies in this place.
 -- The game's own combat module must expose these methods:
@@ -1669,13 +1671,20 @@ local function CombatTestRefresh()
 end
 
 
+local function IsPracticeDummy(model)
+    return model ~= nil
+        and model:IsA("Model")
+        and model:IsDescendantOf(Workspace)
+        and CollectionService:HasTag(model, PRACTICE_DUMMY_TAG)
+        and Players:GetPlayerFromCharacter(model) == nil
+        and model:FindFirstChildOfClass("Humanoid") ~= nil
+        and model:FindFirstChild("HumanoidRootPart") ~= nil
+end
+
 local function CountPracticeDummies()
     local count = 0
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model")
-            and not Players:GetPlayerFromCharacter(obj)
-            and obj:FindFirstChildOfClass("Humanoid")
-            and obj:FindFirstChild("HumanoidRootPart") then
+    for _, obj in ipairs(CollectionService:GetTagged(PRACTICE_DUMMY_TAG)) do
+        if IsPracticeDummy(obj) then
             count += 1
         end
     end
@@ -1690,8 +1699,8 @@ local function GetNearestPracticeDummy()
     end
 
     local nearest, nearestDistance = nil, attackRange
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then
+    for _, obj in ipairs(CollectionService:GetTagged(PRACTICE_DUMMY_TAG)) do
+        if IsPracticeDummy(obj) then
             local humanoid = obj:FindFirstChildOfClass("Humanoid")
             local targetRoot = obj:FindFirstChild("HumanoidRootPart")
             if humanoid and humanoid.Health > 0 and targetRoot then
@@ -1719,24 +1728,43 @@ local function RunAutoFight()
 
     local target = GetNearestPracticeDummy()
     if not target then
-        autoFightStatus = "No practice NPC in range"
+        autoFightStatus = "No tagged practice NPC in range"
         return
     end
 
-    local didWork = false
-    if autoM1Enabled and type(combat.LightAttack) == "function" then
-        local ok = pcall(combat.LightAttack, target)
-        didWork = didWork or ok
-    end
-    if autoSkillsEnabled and type(combat.UseAvailableSkills) == "function" then
-        local ok = pcall(combat.UseAvailableSkills, target)
-        didWork = didWork or ok
+    -- Adapter methods must return true only when the practice action was accepted.
+    local acceptedAction = false
+    local failureReason = nil
+
+    local function callAdapter(methodName)
+        local method = combat[methodName]
+        if type(method) ~= "function" then
+            failureReason = methodName .. " method missing"
+            return
+        end
+
+        local ok, result = pcall(method, target)
+        if not ok then
+            failureReason = methodName .. " error: " .. tostring(result)
+        elseif result == true then
+            acceptedAction = true
+        else
+            failureReason = methodName .. " did not return true"
+        end
     end
 
-    if didWork then
-        autoFightStatus = "Running on NPC: " .. target.Name
+    if autoM1Enabled then
+        callAdapter("LightAttack")
+    end
+    if autoSkillsEnabled then
+        callAdapter("UseAvailableSkills")
+    end
+
+    if acceptedAction then
+        autoFightStatus = "Practice adapter accepted action for: " .. target.Name
     else
-        autoFightStatus = "Combat methods missing or failed"
+        autoFightStatus = "Action not confirmed: "
+            .. tostring(failureReason or "adapter returned no success")
     end
 end
 
@@ -1885,6 +1913,12 @@ end, debug.traceback)
 
 if not buildOk then
     SetDiagnostic("UI build error: " .. tostring(buildError))
+    if monitorConnection then
+        monitorConnection:Disconnect()
+        monitorConnection = nil
+    end
+    pcall(StopAnimationDetector)
+    pcall(Cleanup)
     return
 end
 
