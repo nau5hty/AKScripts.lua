@@ -1,11 +1,11 @@
 --[[
     AXScripts Auto Block Practice Lab
     ---------------------------------
-    Type: LocalScript for Roblox Studio
-    Put this script in StarterPlayer > StarterPlayerScripts.
+    Standalone client-side practice simulator.
 
-    This is a self-contained, local-only practice simulator.
-    It creates pretend attack warnings and tests the Auto Block timing logic.
+    It creates pretend attack warnings and tests Auto Block timing logic.
+    It uses only a local ScreenGui and simulated timers, so it can be
+    launched as a LocalScript or as a local client-side script chunk.
     It does NOT connect to Anime vs Anime, other players, NPCs, remotes,
     or any live game's combat system.
 ]]
@@ -214,6 +214,10 @@ local function setAutoBlock(enabled)
             end
         end)
     elseif not enabled then
+        -- Turning the toggle off during a warning cancels the simulated block.
+        if warningActive then
+            isBlocking = false
+        end
         statusLabel.Text = "Auto Block disabled."
         statusLabel.TextColor3 = Color3.fromRGB(165, 175, 192)
     end
