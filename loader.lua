@@ -9,12 +9,10 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local PlayerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or CoreGui
-local FlingEvent = ReplicatedStorage:FindFirstChild("AKFlingEvent")
 
 -- // Window \\ --
 local Window = LucidUI:CreateWindow({
@@ -81,8 +79,6 @@ local godModeEnabled = false
 local infiniteJumpEnabled = false
 local espEnabled = true
 local boxEspEnabled = false
-local flingEnabled = false
-local flingRadius = 15
 
 -- // God Mode Loop \\ --
 RunService.Stepped:Connect(function()
@@ -266,36 +262,16 @@ TrollSection:CreateToggle({
     end,
 })
 
--- // Fling Nearby \\ --
+-- // Fling Nearby (Unavailable) \\ --
 TrollSection:CreateToggle({
-    Name = "Fling Nearby",
+    Name = "Fling Nearby (Unavailable)",
     Default = false,
     Callback = function(state)
-        flingEnabled = state
-
-        if FlingEvent then
-            FlingEvent:FireServer("SetEnabled", state, flingRadius)
-        else
-            warn("AKScripts: AKFlingEvent is missing from ReplicatedStorage")
-        end
-
-        LucidUI:Notify({
-            Title = "Fling Nearby",
-            Message = state and "Enabled." or "Disabled."
-        })
-    end,
-})
-
-TrollSection:CreateSlider({
-    Name = "Detection Radius",
-    Min = 5,
-    Max = 50,
-    Default = 15,
-    Callback = function(value)
-        flingRadius = value
-
-        if flingEnabled and FlingEvent then
-            FlingEvent:FireServer("SetEnabled", true, flingRadius)
+        if state then
+            LucidUI:Notify({
+                Title = "Feature Unavailable",
+                Message = "This client-only script has no server-side fling handler."
+            })
         end
     end,
 })
