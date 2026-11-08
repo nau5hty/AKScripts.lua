@@ -25,10 +25,11 @@ if oldGui then
 end
 
 -- Simulated timing values.
-local WARNING_WINDOW = 0.85
-local RECOVERY_WINDOW = 1.15
-local COUNTER_DELAY = 0.16
-local CATCH_DELAY = 0.24
+local WARNING_WINDOW = 1.8
+local RECOVERY_WINDOW = 4.5
+local COUNTER_DELAY = 0.65
+local COUNTER_DISPLAY_TIME = 1.25
+local CATCH_DISPLAY_TIME = 1.5
 local MIN_GAP_BETWEEN_ATTACKS = 0.75
 local MAX_GAP_BETWEEN_ATTACKS = 1.25
 
@@ -157,7 +158,7 @@ title.Font = Enum.Font.GothamBold
 makeLabel(
     panel,
     "Subtitle",
-    "LOCAL PRACTICE SIMULATION  •  NO LIVE GAME CONNECTION",
+    "SLOW PRACTICE MODE  •  LOCAL SIMULATION ONLY",
     UDim2.fromOffset(18, 40),
     UDim2.new(1, -36, 0, 18),
     9,
@@ -249,7 +250,7 @@ startButton.BackgroundColor3 = Color3.fromRGB(75, 82, 105)
 makeLabel(
     panel,
     "Footer",
-    "Hold Block covers the warning; Counter + Catch runs in simulated recovery.",
+    "Slow phases: 1.8s warning • 4.5s recovery. Each combo step stays visible.",
     UDim2.fromOffset(18, 313),
     UDim2.new(1, -36, 0, 14),
     8,
@@ -335,7 +336,7 @@ local function runCounterCatchSequence(thisRun, thisCycle)
     statusLabel.TextColor3 = Color3.fromRGB(120, 190, 255)
     updateStats()
 
-    task.wait(CATCH_DELAY)
+    task.wait(COUNTER_DISPLAY_TIME)
     if not running or thisRun ~= runId or thisCycle ~= cycleId or not recoveryActive then
         return
     end
@@ -345,6 +346,7 @@ local function runCounterCatchSequence(thisRun, thisCycle)
     statusLabel.Text = "Practice catch event registered after counter."
     statusLabel.TextColor3 = Color3.fromRGB(94, 220, 160)
     updateStats()
+    task.wait(CATCH_DISPLAY_TIME)
 end
 
 local function startSimulation()
@@ -414,6 +416,12 @@ local function startSimulation()
 
             isBlocking = false
             updateStats()
+            statusLabel.Text = "Impact resolved. Pausing before recovery phase..."
+            statusLabel.TextColor3 = Color3.fromRGB(180, 190, 208)
+            task.wait(1.2)
+            if not running or thisRun ~= runId or thisCycle ~= cycleId then
+                break
+            end
 
             -- Phase 3: recovery/cooldown, where the practice combo is displayed.
             recoveryActive = true
@@ -427,7 +435,7 @@ local function startSimulation()
 
             local remainingRecovery = math.max(
                 0,
-                RECOVERY_WINDOW - COUNTER_DELAY - CATCH_DELAY
+                RECOVERY_WINDOW - COUNTER_DELAY - COUNTER_DISPLAY_TIME - CATCH_DISPLAY_TIME
             )
             task.wait(remainingRecovery)
 
