@@ -1411,12 +1411,15 @@ local function CombatTestAddEvent(message)
 end
 
 local function CombatTestDetectMode()
-    local basicTrainingLabel = nil
-    local basicTrainingSource = nil
+    local textCandidate = nil
+    local textCandidateSource = nil
+    local objectNameCandidate = nil
+    local objectNameSource = nil
+    local screenNameCandidate = nil
+    local screenNameSource = nil
 
     for _, object in ipairs(PlayerGui:GetDescendants()) do
-        if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
-            and HUDIsVisible(object) then
+        if object:IsA("GuiObject") and HUDIsVisible(object) then
             local screenGui = HUDGetScreenGui(object)
             local guiName = string.lower(tostring(screenGui and screenGui.Name or ""))
             local isOurGui =
@@ -1424,34 +1427,73 @@ local function CombatTestDetectMode()
                 or string.find(guiName, "axscripts", 1, true)
 
             if not isOurGui then
-                local value = HUDCleanText(object.Text)
-                local normalized = string.lower(value):gsub("%s+", " ")
+                local objectName = string.lower(tostring(object.Name or ""))
+                local looksLikeTrainingName =
+                    string.find(objectName, "training", 1, true)
+                    or string.find(objectName, "practice", 1, true)
 
-                -- Strong labels are more specific than a lone Training button.
-                if normalized == "training mode"
-                    or normalized == "mode: training"
-                    or normalized == "mode - training"
-                    or normalized == "practice mode"
-                    or normalized == "mode: practice" then
-                    return "TRAINING MODE LABEL VISIBLE", object.Name, value
+                if looksLikeTrainingName and not objectNameCandidate then
+                    objectNameCandidate = object.Name
+                    objectNameSource = "Visible GuiObject.Name"
                 end
 
-                if not basicTrainingLabel
-                    and (normalized == "training" or normalized == "practice") then
-                    basicTrainingLabel = object.Name
-                    basicTrainingSource = value
+                local looksLikeTrainingScreen =
+                    string.find(guiName, "training", 1, true)
+                    or string.find(guiName, "practice", 1, true)
+
+                if looksLikeTrainingScreen and not screenNameCandidate then
+                    screenNameCandidate = screenGui.Name
+                    screenNameSource = "Visible ScreenGui.Name"
+                end
+
+                if object:IsA("TextLabel")
+                    or object:IsA("TextButton")
+                    or object:IsA("TextBox") then
+                    local value = HUDCleanText(object.Text)
+                    local normalized = string.lower(value):gsub("%s+", " ")
+                    local hasTrainingPhrase =
+                        string.find(normalized, "training mode", 1, true)
+                        or string.find(normalized, "practice mode", 1, true)
+                        or string.find(normalized, "training area", 1, true)
+                        or string.find(normalized, "practice area", 1, true)
+                        or string.find(normalized, "enter training", 1, true)
+                        or string.find(normalized, "enter practice", 1, true)
+
+                    if hasTrainingPhrase then
+                        return "TRAINING TEXT CANDIDATE (ACTIVE MODE UNCONFIRMED)",
+                            object.Name,
+                            CombatTestClip(value, 70)
+                    end
+
+                    if not textCandidate
+                        and (normalized == "training" or normalized == "practice") then
+                        textCandidate = object.Name
+                        textCandidateSource = value
+                    end
                 end
             end
         end
     end
 
-    if basicTrainingLabel then
-        return "TRAINING LABEL VISIBLE (ACTIVE MODE NOT CONFIRMED)",
-            basicTrainingLabel,
-            basicTrainingSource
+    if textCandidate then
+        return "TRAINING TEXT CANDIDATE (ACTIVE MODE UNCONFIRMED)",
+            textCandidate,
+            textCandidateSource
     end
 
-    return "NOT IDENTIFIED (NO VISIBLE TRAINING LABEL)", nil, nil
+    if objectNameCandidate then
+        return "TRAINING UI NAME CANDIDATE (ACTIVE MODE UNCONFIRMED)",
+            objectNameCandidate,
+            objectNameSource
+    end
+
+    if screenNameCandidate then
+        return "TRAINING SCREEN CANDIDATE (ACTIVE MODE UNCONFIRMED)",
+            screenNameCandidate,
+            screenNameSource
+    end
+
+    return "NOT IDENTIFIED (NO VISIBLE TRAINING UI MARKER)", nil, nil
 end
 
 local function CombatTestRefresh()
