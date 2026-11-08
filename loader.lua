@@ -1311,7 +1311,7 @@ local function HUDAddHistory(message)
     while #hudMonitorHistory > 3 do
         table.remove(hudMonitorHistory)
     end
-    hudMonitorHistoryLabel.Text = table.concat(hudMonitorHistory, "\\n")
+    hudMonitorHistoryLabel.Text = table.concat(hudMonitorHistory, "\n")
 end
 
 local function HUDClearValues()
