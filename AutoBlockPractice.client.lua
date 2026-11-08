@@ -92,6 +92,57 @@ stroke.Color = Color3.fromRGB(65, 72, 88)
 stroke.Thickness = 1
 stroke.Parent = panel
 
+-- Drag the practice panel by its header area.
+local dragHandle = Instance.new("Frame")
+dragHandle.Name = "AXScriptsDragHandle"
+dragHandle.BackgroundTransparency = 1
+dragHandle.BorderSizePixel = 0
+dragHandle.Position = UDim2.fromOffset(0, 0)
+dragHandle.Size = UDim2.new(1, 0, 0, 62)
+dragHandle.Active = true
+dragHandle.ZIndex = 2
+dragHandle.Parent = panel
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local panelStart = nil
+
+dragHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        panelStart = panel.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+dragHandle.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if dragging and (input == dragInput
+        or input.UserInputType == Enum.UserInputType.MouseMovement) then
+        local delta = input.Position - dragStart
+        panel.Position = UDim2.new(
+            panelStart.X.Scale,
+            panelStart.X.Offset + delta.X,
+            panelStart.Y.Scale,
+            panelStart.Y.Offset + delta.Y
+        )
+    end
+end)
+
 local title = makeLabel(
     panel,
     "Title",
