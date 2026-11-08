@@ -62,12 +62,24 @@ end
 
 SetDiagnostic("LucidUI loaded; creating window")
 
+-- Choose a compact window size from the current device viewport.
+local camera = Workspace.CurrentCamera
+local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+local isSmallScreen = viewport.X < 700
+local windowWidth = isSmallScreen
+    and math.floor(math.clamp(viewport.X * 0.88, 280, 380))
+    or 620
+local windowHeight = isSmallScreen
+    and math.floor(math.clamp(viewport.Y * 0.72, 300, 520))
+    or 460
+
 local windowOk, Window = pcall(function()
     local window = LucidUI:CreateWindow({
         Name = "AKScripts",
-        Size = UDim2.new(0, 260, 0, 160),
-        CompactMode = true,
-        Theme = "Void"
+        Width = windowWidth,
+        Height = windowHeight,
+        Theme = "Void",
+        IntroEnabled = false
     })
     window:BuildSettingsPanel()
     return window
