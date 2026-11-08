@@ -410,7 +410,7 @@ local function CreateAnimationDetectorPanel()
     local title = CreateDetectorPanelLabel(
         detectorPanel,
         "Title",
-        "AXScripts  /  Attack Animation Tester",
+        "AXScripts  /  Live Attack Timing",
         UDim2.fromOffset(12, 7),
         UDim2.new(1, -48, 0, 24),
         13
