@@ -178,6 +178,89 @@ local function readUpperRightHudText()
     return lines
 end
 
+
+local function readOverheadNameLabels()
+    local roster = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        roster[string.lower(player.Name)] = true
+        roster[string.lower(player.DisplayName)] = true
+    end
+
+    local entries = {}
+    local seen = {}
+
+    local function cleanText(value)
+        value = tostring(value or ""):gsub("[%c]", " ")
+        value = value:gsub("^%s+", ""):gsub("%s+$", "")
+        return value
+    end
+
+    local function getAttachedModel(billboard)
+        local current = billboard.Adornee or billboard.Parent
+        while current and current ~= Workspace do
+            if current:IsA("Model") then
+                return current
+            end
+            current = current.Parent
+        end
+        return nil
+    end
+
+    for _, object in ipairs(Workspace:GetDescendants()) do
+        if object:IsA("BillboardGui") and object.Enabled then
+            local model = getAttachedModel(object)
+            if model and model ~= LocalPlayer.Character then
+                local modelRoot = findModelRoot(model)
+                local closeEnough = true
+                if modelRoot and LocalPlayer.Character then
+                    local myRoot = findModelRoot(LocalPlayer.Character)
+                    if myRoot then
+                        closeEnough = (modelRoot.Position - myRoot.Position).Magnitude <= SCAN_RADIUS
+                    end
+                end
+
+                if closeEnough then
+                    local linkedPlayer = Players:GetPlayerFromCharacter(model)
+                    for _, label in ipairs(object:GetDescendants()) do
+                        if label:IsA("TextLabel") or label:IsA("TextButton") or label:IsA("TextBox") then
+                            local value = cleanText(label.Text)
+                            local key = string.lower(value)
+                            if value ~= "" and not seen[model:GetFullName() .. "|" .. label.Name .. "|" .. key] then
+                                seen[model:GetFullName() .. "|" .. label.Name .. "|" .. key] = true
+
+                                local status
+                                if linkedPlayer then
+                                    status = "PLAYER MODEL: " .. linkedPlayer.Name
+                                elseif roster[key] then
+                                    status = "LABEL MATCHES SERVER ROSTER"
+                                else
+                                    status = "NOT IN ROSTER - POSSIBLE BOT/TITLE"
+                                end
+
+                                table.insert(entries, {
+                                    model = model.Name,
+                                    label = label.Name,
+                                    value = value,
+                                    status = status
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(entries, function(a, b)
+        if a.model == b.model then
+            return a.label < b.label
+        end
+        return a.model < b.model
+    end)
+
+    return entries
+end
+
 local function findModelRoot(model)
     local rootNames = {
         "HumanoidRootPart",
@@ -306,6 +389,27 @@ local function refresh()
     else
         for _, line in ipairs(hudLines) do
             table.insert(lines, "  " .. line)
+        end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "OVERHEAD LABELS VS SERVER PLAYER ROSTER:")
+    local overheadEntries = readOverheadNameLabels()
+    if #overheadEntries == 0 then
+        table.insert(lines, "  No nearby BillboardGui text labels found.")
+    else
+        for index = 1, math.min(#overheadEntries, 15) do
+            local entry = overheadEntries[index]
+            table.insert(lines, string.format(
+                "  %s | %s = %s | %s",
+                entry.model,
+                entry.label,
+                entry.value,
+                entry.status
+            ))
+        end
+        if #overheadEntries > 15 then
+            table.insert(lines, "  ... plus " .. tostring(#overheadEntries - 15) .. " more labels.")
         end
     end
 
