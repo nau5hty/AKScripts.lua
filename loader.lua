@@ -187,6 +187,7 @@ local combatTestPlayerHealth = nil
 local combatTestLastGuardText = nil
 local combatTestLastHudHP1 = nil
 local combatTestLastHudHP2 = nil
+local combatTestLastModeStatus = nil
 local combatTestTextState = setmetatable({}, {__mode = "k"})
 local combatTestHistory = {}
 
@@ -1409,6 +1410,50 @@ local function CombatTestAddEvent(message)
     end
 end
 
+local function CombatTestDetectMode()
+    local basicTrainingLabel = nil
+    local basicTrainingSource = nil
+
+    for _, object in ipairs(PlayerGui:GetDescendants()) do
+        if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+            and HUDIsVisible(object) then
+            local screenGui = HUDGetScreenGui(object)
+            local guiName = string.lower(tostring(screenGui and screenGui.Name or ""))
+            local isOurGui =
+                string.find(guiName, "akscripts", 1, true)
+                or string.find(guiName, "axscripts", 1, true)
+
+            if not isOurGui then
+                local value = HUDCleanText(object.Text)
+                local normalized = string.lower(value):gsub("%s+", " ")
+
+                -- Strong labels are more specific than a lone Training button.
+                if normalized == "training mode"
+                    or normalized == "mode: training"
+                    or normalized == "mode - training"
+                    or normalized == "practice mode"
+                    or normalized == "mode: practice" then
+                    return "TRAINING MODE LABEL VISIBLE", object.Name, value
+                end
+
+                if not basicTrainingLabel
+                    and (normalized == "training" or normalized == "practice") then
+                    basicTrainingLabel = object.Name
+                    basicTrainingSource = value
+                end
+            end
+        end
+    end
+
+    if basicTrainingLabel then
+        return "TRAINING LABEL VISIBLE (ACTIVE MODE NOT CONFIRMED)",
+            basicTrainingLabel,
+            basicTrainingSource
+    end
+
+    return "NOT IDENTIFIED (NO VISIBLE TRAINING LABEL)", nil, nil
+end
+
 local function CombatTestRefresh()
     if not combatTestParagraph then
         return
@@ -1418,6 +1463,17 @@ local function CombatTestRefresh()
     local matchActive = snapshot ~= nil
         and snapshot.fighter ~= nil
         and #snapshot.hp >= 2
+
+    local modeStatus, modeObjectName, modeText = CombatTestDetectMode()
+    if modeStatus ~= combatTestLastModeStatus then
+        if modeStatus == "TRAINING MODE LABEL VISIBLE"
+            or modeStatus == "TRAINING LABEL VISIBLE (ACTIVE MODE NOT CONFIRMED)" then
+            CombatTestAddEvent("MODE DETECTION | " .. modeStatus
+                .. " | " .. tostring(modeObjectName)
+                .. ": " .. CombatTestClip(modeText, 60))
+        end
+        combatTestLastModeStatus = modeStatus
+    end
 
     -- Observe only the game's match HUD ScreenGui selected by the timer.
     -- This prevents AX Scripts' own monitor paragraph from reading itself.
@@ -1548,6 +1604,7 @@ local function CombatTestRefresh()
     end
 
     local lines = {
+        "MODE: " .. modeStatus,
         "STATUS: " .. (matchActive and "MATCH HUD FOUND" or "WAITING FOR MATCH HUD"),
         "Local Humanoid HP: " .. localHealthText,
         "Visible match HP slots: " .. hudHPText,
@@ -1764,7 +1821,7 @@ local buildOk, buildError = xpcall(function()
 
     local CombatTestSection = FarmTab:CreateSection({Name = "Live Combat Test Monitor (Read Only)"})
     combatTestParagraph = CombatTestSection:CreateParagraph({
-        Text = "STATUS: WAITING FOR MATCH HUD\nLocal Humanoid HP: unavailable\nVisible match HP slots: not available\nVisible block/guard HUD: not found\n\nOBSERVED VISIBLE COMBAT CHANGES\nNo matching HUD changes or local damage observed yet.\n\nRead-only: observations do not prove a successful block.",
+        Text = "MODE: NOT IDENTIFIED (NO VISIBLE TRAINING LABEL)\nSTATUS: WAITING FOR MATCH HUD\nLocal Humanoid HP: unavailable\nVisible match HP slots: not available\nVisible block/guard HUD: not found\n\nOBSERVED VISIBLE COMBAT CHANGES\nNo matching HUD changes or local damage observed yet.\n\nRead-only: observations do not prove a successful block.",
         TextSize = 10,
         PaddingX = 6,
         PaddingY = 6
