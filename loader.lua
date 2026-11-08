@@ -177,7 +177,457 @@ local detectorStatsLabel = nil
 local detectorLogLabel = nil
 local detectorStartButton = nil
 local detectorDragConnections = {}
-local RefreshAnimationDetectorPanel = function()
+local RefreshAnimationDetectorPanel = function() end
+
+local function IsOpponentCharacter(player, character)
+    return player ~= nil
+        and player ~= LocalPlayer
+        and character ~= nil
+        and character:IsA("Model")
+        and player.Character == character
+end
+
+local function RecordOpponentAnimation(player, track, source)
+    if not animationDetectionEnabled or not player or player == LocalPlayer then
+        return
+    end
+
+    local animation = track and track.Animation
+    local animationId = animation and animation.AnimationId or "Unknown"
+    local eventRecord = {
+        Player = player.Name,
+        AnimationId = animationId,
+        Classification = animationClassesById[animationId] or "UNREVIEWED",
+        Elapsed = os.clock() - animationDetectionStartedAt,
+        Priority = track and track.Priority and track.Priority.Name or "Unknown",
+        Length = track and tonumber(track.Length) or 0,
+        Source = source or "LIVE",
+    }
+
+    table.insert(animationEvents, eventRecord)
+    if #animationEvents > 80 then
+        table.remove(animationEvents, 1)
+    end
+    lastAnimationEvent = eventRecord
+
+    print(string.format(
+        "[AXScripts Animation Monitor] %s | Player=%s | ID=%s | +%.0fms | %s | priority=%s | length=%.2fs",
+        eventRecord.Classification,
+        eventRecord.Player,
+        tostring(animationId),
+        eventRecord.Elapsed * 1000,
+        eventRecord.Source,
+        eventRecord.Priority,
+        eventRecord.Length
+    ))
+
+    RefreshAnimationDetectorPanel()
+end
+
+local function AttachOpponentAnimator(player, character, animator)
+    if not animationDetectionEnabled
+        or not IsOpponentCharacter(player, character)
+        or not animator:IsA("Animator")
+        or animationAnimatorConnections[animator] then
+        return
+    end
+
+    local connection = animator.AnimationPlayed:Connect(function(track)
+        RecordOpponentAnimation(player, track, "LIVE")
+    end)
+
+    animationAnimatorConnections[animator] = {
+        Connection = connection,
+        Player = player,
+        Character = character,
+    }
+
+    -- Snapshot current tracks separately so they are not mistaken for fresh starts.
+    local ok, tracks = pcall(function()
+        return animator:GetPlayingAnimationTracks()
+    end)
+    if ok and type(tracks) == "table" then
+        for _, track in ipairs(tracks) do
+            if track and track.IsPlaying then
+                RecordOpponentAnimation(player, track, "ACTIVE")
+            end
+        end
+    end
+end
+
+local function AttachOpponentCharacter(player, character)
+    if not animationDetectionEnabled
+        or not IsOpponentCharacter(player, character)
+        or animationModelConnections[character] then
+        return
+    end
+
+    local connections = {}
+    animationModelConnections[character] = connections
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("Animator") then
+            AttachOpponentAnimator(player, character, descendant)
+        end
+    end
+
+    connections.DescendantAdded = character.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("Animator") then
+            AttachOpponentAnimator(player, character, descendant)
+        end
+    end)
+end
+
+local function AttachOpponentPlayer(player)
+    if not animationDetectionEnabled or player == LocalPlayer or animationPlayerConnections[player] then
+        return
+    end
+
+    animationPlayerConnections[player] = player.CharacterAdded:Connect(function(character)
+        AttachOpponentCharacter(player, character)
+    end)
+
+    if player.Character then
+        AttachOpponentCharacter(player, player.Character)
+    end
+end
+
+local function DetachOpponentPlayer(player)
+    local playerConnection = animationPlayerConnections[player]
+    if playerConnection then
+        playerConnection:Disconnect()
+        animationPlayerConnections[player] = nil
+    end
+
+    for character, connections in pairs(animationModelConnections) do
+        if Players:GetPlayerFromCharacter(character) == player then
+            for _, connection in pairs(connections) do
+                connection:Disconnect()
+            end
+            animationModelConnections[character] = nil
+        end
+    end
+
+    for animator, entry in pairs(animationAnimatorConnections) do
+        if entry.Player == player then
+            entry.Connection:Disconnect()
+            animationAnimatorConnections[animator] = nil
+        end
+    end
+end
+
+local function StopAnimationDetector()
+    animationDetectionEnabled = false
+
+    for _, entry in pairs(animationAnimatorConnections) do
+        entry.Connection:Disconnect()
+    end
+    table.clear(animationAnimatorConnections)
+
+    for _, connections in pairs(animationModelConnections) do
+        for _, connection in pairs(connections) do
+            connection:Disconnect()
+        end
+    end
+    table.clear(animationModelConnections)
+
+    for _, connection in pairs(animationPlayerConnections) do
+        connection:Disconnect()
+    end
+    table.clear(animationPlayerConnections)
+
+    if animationPlayersAddedConnection then
+        animationPlayersAddedConnection:Disconnect()
+        animationPlayersAddedConnection = nil
+    end
+    if animationPlayersRemovingConnection then
+        animationPlayersRemovingConnection:Disconnect()
+        animationPlayersRemovingConnection = nil
+    end
+
+    RefreshAnimationDetectorPanel()
+end
+
+local function StartAnimationDetector()
+    StopAnimationDetector()
+    table.clear(animationEvents)
+    lastAnimationEvent = nil
+    animationDetectionStartedAt = os.clock()
+    animationDetectionEnabled = true
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        AttachOpponentPlayer(player)
+    end
+
+    animationPlayersAddedConnection = Players.PlayerAdded:Connect(function(player)
+        AttachOpponentPlayer(player)
+    end)
+
+    animationPlayersRemovingConnection = Players.PlayerRemoving:Connect(function(player)
+        DetachOpponentPlayer(player)
+    end)
+
+    RefreshAnimationDetectorPanel()
+    return true, "Watching other players' replicated character animations."
+end
+
+local function ClassifyLastAnimation(classification)
+    if not lastAnimationEvent then
+        return false, "No opponent animation has been observed yet."
+    end
+
+    local animationId = lastAnimationEvent.AnimationId
+    if animationId == "Unknown" then
+        return false, "The last animation has no readable asset ID."
+    end
+
+    animationClassesById[animationId] = classification
+    for _, eventRecord in ipairs(animationEvents) do
+        if eventRecord.AnimationId == animationId then
+            eventRecord.Classification = classification
+        end
+    end
+
+    lastAnimationEvent.Classification = classification
+    RefreshAnimationDetectorPanel()
+    return true, "Saved " .. classification .. " label for " .. animationId
+end
+
+local function GetAnimationDetectorStatus()
+    local attackCount, otherCount, unreviewedCount = 0, 0, 0
+    for _, eventRecord in ipairs(animationEvents) do
+        if eventRecord.Classification == "ATTACK" then
+            attackCount += 1
+        elseif eventRecord.Classification == "OTHER" then
+            otherCount += 1
+        else
+            unreviewedCount += 1
+        end
+    end
+
+    local lastId = lastAnimationEvent and lastAnimationEvent.AnimationId or "none"
+    return string.format(
+        "Observed: %d | Attack IDs: %d | Other IDs: %d | Unreviewed: %d | Last ID: %s",
+        #animationEvents,
+        attackCount,
+        otherCount,
+        unreviewedCount,
+        tostring(lastId)
+    )
+end
+
+local function CreateDetectorPanelButton(parent, name, caption, position, size, color)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Text = caption
+    button.Position = position
+    button.Size = size
+    button.BackgroundColor3 = color or Color3.fromRGB(42, 42, 52)
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamBold
+    button.TextColor3 = Color3.fromRGB(240, 240, 245)
+    button.TextSize = 11
+    button.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+    return button
+end
+
+local function CreateDetectorPanelLabel(parent, name, caption, position, size, textSize)
+    local label = Instance.new("TextLabel")
+    label.Name = name
+    label.Text = caption
+    label.Position = position
+    label.Size = size
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextColor3 = Color3.fromRGB(225, 225, 235)
+    label.TextSize = textSize or 11
+    label.TextWrapped = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.Parent = parent
+    return label
+end
+
+local function CreateAnimationDetectorPanel()
+    if detectorPanel or not ProtectedGui then
+        return
+    end
+
+    detectorPanel = Instance.new("Frame")
+    detectorPanel.Name = "AnimationDetectorPanel"
+    detectorPanel.Size = UDim2.fromOffset(350, 285)
+    detectorPanel.Position = UDim2.new(0, 14, 1, -300)
+    detectorPanel.BackgroundColor3 = Color3.fromRGB(17, 17, 22)
+    detectorPanel.BorderSizePixel = 0
+    detectorPanel.Visible = false
+    detectorPanel.Parent = ProtectedGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = detectorPanel
+
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.fromRGB(75, 75, 88)
+    outline.Thickness = 1
+    outline.Parent = detectorPanel
+
+    local title = CreateDetectorPanelLabel(
+        detectorPanel,
+        "Title",
+        "AXScripts  /  Opponent Animation Monitor",
+        UDim2.fromOffset(12, 7),
+        UDim2.new(1, -48, 0, 24),
+        13
+    )
+    title.Font = Enum.Font.GothamBold
+    title.Active = true
+
+    -- Drag the secondary tester panel by its title area (mouse or touch).
+    local dragging = false
+    local dragInput = nil
+    local dragStart = nil
+    local panelStart = nil
+
+    table.insert(detectorDragConnections, title.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+            dragStart = input.Position
+            panelStart = detectorPanel.AbsolutePosition
+        end
+    end))
+
+    table.insert(detectorDragConnections, UserInputService.InputChanged:Connect(function(input)
+        if not dragging then
+            return
+        end
+
+        local isDragMovement = input.UserInputType == Enum.UserInputType.MouseMovement
+            or (dragInput ~= nil and input == dragInput)
+
+        if not isDragMovement then
+            return
+        end
+
+        local delta = input.Position - dragStart
+        local currentCamera = Workspace.CurrentCamera
+        local currentViewport = currentCamera and currentCamera.ViewportSize or viewport
+        local maxX = math.max(0, currentViewport.X - detectorPanel.AbsoluteSize.X)
+        local maxY = math.max(0, currentViewport.Y - detectorPanel.AbsoluteSize.Y)
+
+        detectorPanel.Position = UDim2.fromOffset(
+            math.clamp(panelStart.X + delta.X, 0, maxX),
+            math.clamp(panelStart.Y + delta.Y, 0, maxY)
+        )
+    end))
+
+    table.insert(detectorDragConnections, UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+            dragInput = nil
+        end
+    end))
+
+    local closeButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "Close",
+        "X",
+        UDim2.new(1, -34, 0, 7),
+        UDim2.fromOffset(24, 24),
+        Color3.fromRGB(80, 40, 44)
+    )
+    closeButton.MouseButton1Click:Connect(function()
+        detectorPanel.Visible = false
+    end)
+
+    detectorStatusLabel = CreateDetectorPanelLabel(
+        detectorPanel,
+        "Status",
+        "Status: stopped",
+        UDim2.fromOffset(12, 34),
+        UDim2.new(1, -24, 0, 30),
+        10
+    )
+    detectorStatusLabel.TextColor3 = Color3.fromRGB(165, 200, 255)
+
+    detectorStartButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "StartStop",
+        "START DETECTOR",
+        UDim2.fromOffset(12, 70),
+        UDim2.new(1, -24, 0, 30),
+        Color3.fromRGB(42, 65, 90)
+    )
+    detectorStartButton.MouseButton1Click:Connect(function()
+        if animationDetectionEnabled then
+            StopAnimationDetector()
+        else
+            local started, message = StartAnimationDetector()
+            if not started then
+                detectorStatusLabel.Text = message
+            end
+        end
+        RefreshAnimationDetectorPanel()
+    end)
+
+    local attackButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "MarkAttack",
+        "MARK LAST: ATTACK",
+        UDim2.fromOffset(12, 107),
+        UDim2.new(0.5, -18, 0, 28),
+        Color3.fromRGB(35, 75, 58)
+    )
+    attackButton.MouseButton1Click:Connect(function()
+        local ok, message = ClassifyLastAnimation("ATTACK")
+        detectorStatusLabel.Text = message
+        RefreshAnimationDetectorPanel()
+    end)
+
+    local otherButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "MarkOther",
+        "MARK LAST: OTHER",
+        UDim2.new(0.5, 6, 0, 107),
+        UDim2.new(0.5, -18, 0, 28),
+        Color3.fromRGB(82, 58, 43)
+    )
+    otherButton.MouseButton1Click:Connect(function()
+        local ok, message = ClassifyLastAnimation("OTHER")
+        detectorStatusLabel.Text = message
+        RefreshAnimationDetectorPanel()
+    end)
+
+    detectorStatsLabel = CreateDetectorPanelLabel(
+        detectorPanel,
+        "Stats",
+        "Events: 0 | Attack: 0 | Other: 0 | Unreviewed: 0",
+        UDim2.fromOffset(12, 140),
+        UDim2.new(1, -24, 0, 27),
+        9
+    )
+
+    detectorLogLabel = CreateDetectorPanelLabel(
+        detectorPanel,
+        "RecentEvents",
+        "No opponent animation events yet. Start the monitor first.",
+        UDim2.fromOffset(12, 170),
+        UDim2.new(1, -24, 1, -180),
+        9
+    )
+    detectorLogLabel.Font = Enum.Font.Code
+    detectorLogLabel.TextYAlignment = Enum.TextYAlignment.Top
+
+    RefreshAnimationDetectorPanel()
+end
+
+RefreshAnimationDetectorPanel = function()
     if not detectorPanel then
         return
     end
@@ -226,7 +676,6 @@ local RefreshAnimationDetectorPanel = function()
         and table.concat(visible, "\n")
         or "No events yet. Start monitoring and watch a nearby opponent."
 end
-
 CreateAnimationDetectorPanel()
 
 local function CountPracticeDummies()
