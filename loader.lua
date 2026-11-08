@@ -1385,8 +1385,20 @@ end
 
 
 
+local function CombatTestClip(value, maxLength)
+    local textValue = tostring(value or "")
+    textValue = textValue:gsub("[%c]", " ")
+    if #textValue > maxLength then
+        return string.sub(textValue, 1, maxLength - 3) .. "..."
+    end
+    return textValue
+end
+
 local function CombatTestAddEvent(message)
-    local entry = "[" .. os.date("%H:%M:%S") .. "] " .. tostring(message)
+    -- Keep every logged event short so an oversized HUD/chat label cannot
+    -- overflow the UI library's Text property limit.
+    local safeMessage = CombatTestClip(message, 150)
+    local entry = "[" .. os.date("%H:%M:%S") .. "] " .. safeMessage
     if combatTestHistory[1] == entry then
         return
     end
@@ -1411,9 +1423,12 @@ local function CombatTestRefresh()
         if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
             and HUDIsVisible(object) then
             local currentText = HUDCleanText(object.Text)
+            local trackedText = CombatTestClip(currentText, 160)
             local previousText = combatTestTextState[object]
             local objectName = string.lower(tostring(object.Name or ""))
-            local combined = string.lower(objectName .. " " .. currentText)
+            -- Avoid scanning/logging huge chat or debug labels as combat events.
+            local searchableText = #currentText <= 180 and currentText or ""
+            local combined = string.lower(objectName .. " " .. searchableText)
             local relevant =
                 string.find(combined, "attack", 1, true)
                 or string.find(combined, "block", 1, true)
@@ -1430,11 +1445,11 @@ local function CombatTestRefresh()
                 or string.find(combined, "damage", 1, true)
                 or string.find(combined, "m1", 1, true)
 
-            if previousText ~= nil and previousText ~= currentText and relevant then
+            if previousText ~= nil and previousText ~= trackedText and relevant then
                 CombatTestAddEvent("VISIBLE HUD CHANGE | " .. tostring(object.Name)
-                    .. ": " .. (currentText ~= "" and currentText or "<blank>"))
+                    .. ": " .. (trackedText ~= "" and trackedText or "<blank>"))
             end
-            combatTestTextState[object] = currentText
+            combatTestTextState[object] = trackedText
         end
     end
 
@@ -1469,7 +1484,8 @@ local function CombatTestRefresh()
             and HUDIsVisible(object) then
             local objectName = string.lower(tostring(object.Name or "")):gsub("[^%w]", "")
             local value = HUDCleanText(object.Text)
-            local lowerValue = string.lower(value)
+            local displayValue = CombatTestClip(value, 120)
+            local lowerValue = string.lower(displayValue)
             local namedMeter =
                 string.find(objectName, "blockhp", 1, true)
                 or string.find(objectName, "blockhealth", 1, true)
@@ -1482,8 +1498,8 @@ local function CombatTestRefresh()
                 or string.find(lowerValue, "guard hp", 1, true)
                 or string.find(lowerValue, "guard health", 1, true)
                 or string.find(lowerValue, "posture", 1, true)
-            if value ~= "" and (namedMeter or labelledMeter) then
-                guardText = value
+            if displayValue ~= "" and (namedMeter or labelledMeter) then
+                guardText = displayValue
                 break
             end
         end
@@ -1541,7 +1557,9 @@ local function CombatTestRefresh()
     end
     table.insert(lines, "")
     table.insert(lines, "Read-only: observations do not prove a successful block.")
-    combatTestParagraph:Set(table.concat(lines, "\n"))
+    local outputText = table.concat(lines, "\n")
+    -- Final safety cap well below LucidUI's 200,000-character Text limit.
+    combatTestParagraph:Set(string.sub(outputText, 1, 6000))
 end
 
 
