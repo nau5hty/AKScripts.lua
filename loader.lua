@@ -1211,6 +1211,7 @@ local function HUDGetSnapshot()
         local timerScreen = HUDGetScreenGui(timerObject)
         local snapshot = {
             timer = timerCandidate.value,
+            screenGui = timerScreen,
             fighter = nil,
             hp = {},
             heartsLeft = nil,
@@ -1418,8 +1419,11 @@ local function CombatTestRefresh()
         and snapshot.fighter ~= nil
         and #snapshot.hp >= 2
 
-    -- Observe changes in visible combat-related GUI text only.
-    for _, object in ipairs(PlayerGui:GetDescendants()) do
+    -- Observe only the game's match HUD ScreenGui selected by the timer.
+    -- This prevents AX Scripts' own monitor paragraph from reading itself.
+    local observationRoot = matchActive and snapshot.screenGui or nil
+    if observationRoot then
+        for _, object in ipairs(observationRoot:GetDescendants()) do
         if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
             and HUDIsVisible(object) then
             local currentText = HUDCleanText(object.Text)
@@ -1451,6 +1455,7 @@ local function CombatTestRefresh()
             end
             combatTestTextState[object] = trackedText
         end
+        end
     end
 
     -- Local Humanoid health is a direct, read-only indicator of damage received.
@@ -1477,9 +1482,10 @@ local function CombatTestRefresh()
         combatTestPlayerHealth = nil
     end
 
-    -- Only accept visible text explicitly identifying a guard/block meter.
+    -- Search for a guard meter only inside the selected game HUD layer.
     local guardText = nil
-    for _, object in ipairs(PlayerGui:GetDescendants()) do
+    if observationRoot then
+        for _, object in ipairs(observationRoot:GetDescendants()) do
         if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
             and HUDIsVisible(object) then
             local objectName = string.lower(tostring(object.Name or "")):gsub("[^%w]", "")
@@ -1502,6 +1508,7 @@ local function CombatTestRefresh()
                 guardText = displayValue
                 break
             end
+        end
         end
     end
 
