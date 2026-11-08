@@ -83,29 +83,39 @@ closeButton.TextSize = 11
 closeButton.Parent = panel
 Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 6)
 
-local output = Instance.new("TextLabel")
+local output = Instance.new("ScrollingFrame")
 output.Name = "Output"
 output.Size = UDim2.new(1, -20, 1, -80)
 output.Position = UDim2.fromOffset(10, 74)
 output.BackgroundColor3 = Color3.fromRGB(13, 15, 20)
 output.BorderSizePixel = 0
-output.TextColor3 = Color3.fromRGB(220, 226, 235)
-output.Font = Enum.Font.Code
-output.TextSize = 12
-output.TextXAlignment = Enum.TextXAlignment.Left
-output.TextYAlignment = Enum.TextYAlignment.Top
-output.TextWrapped = true
-output.RichText = false
-output.Text = "Press REFRESH while a 1v1 match is active."
+output.ScrollBarThickness = 5
+output.AutomaticCanvasSize = Enum.AutomaticSize.Y
+output.CanvasSize = UDim2.new(0, 0, 0, 0)
 output.Parent = panel
 Instance.new("UICorner", output).CornerRadius = UDim.new(0, 7)
+
+local outputText = Instance.new("TextLabel")
+outputText.Name = "OutputText"
+outputText.Size = UDim2.new(1, -12, 0, 0)
+outputText.AutomaticSize = Enum.AutomaticSize.Y
+outputText.BackgroundTransparency = 1
+outputText.TextColor3 = Color3.fromRGB(220, 226, 235)
+outputText.Font = Enum.Font.Code
+outputText.TextSize = 12
+outputText.TextXAlignment = Enum.TextXAlignment.Left
+outputText.TextYAlignment = Enum.TextYAlignment.Top
+outputText.TextWrapped = true
+outputText.RichText = false
+outputText.Text = "Press REFRESH while a 1v1 match is active."
+outputText.Parent = output
 
 local outputPadding = Instance.new("UIPadding")
 outputPadding.PaddingTop = UDim.new(0, 8)
 outputPadding.PaddingBottom = UDim.new(0, 8)
 outputPadding.PaddingLeft = UDim.new(0, 8)
 outputPadding.PaddingRight = UDim.new(0, 8)
-outputPadding.Parent = output
+outputPadding.Parent = outputText
 
 local function isGuiVisible(object)
     local current = object
@@ -265,7 +275,7 @@ local function refresh()
 
     table.insert(lines, "")
     table.insert(lines, "Send the HUD lines and character list back.")
-    output.Text = table.concat(lines, "\n")
+    outputText.Text = table.concat(lines, "\n")
 end
 
 refreshButton.Activated:Connect(refresh)
