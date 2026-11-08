@@ -175,6 +175,11 @@ local detectorStatsLabel = nil
 local detectorLogLabel = nil
 local detectorStartButton = nil
 local detectorDragConnections = {}
+local manualTimingSession = false
+local manualSessionStartedAt = 0
+local manualAttackStartedAt = nil
+local manualTimingRecords = {}
+local lastManualTimingMs = nil
 local RefreshAnimationDetectorPanel = function() end
 
 local function IsPracticeNPC(model)
@@ -492,52 +497,77 @@ local function CreateAnimationDetectorPanel()
         Color3.fromRGB(42, 65, 90)
     )
     detectorStartButton.MouseButton1Click:Connect(function()
-        if animationDetectionEnabled then
-            StopAnimationDetector()
+        manualTimingSession = not manualTimingSession
+        manualAttackStartedAt = nil
+        if manualTimingSession then
+            manualSessionStartedAt = os.clock()
+            table.clear(manualTimingRecords)
+            lastManualTimingMs = nil
+            detectorStatusLabel.Text = "Live manual timing session started."
         else
-            local started, message = StartAnimationDetector()
-            if not started then
-                LucidUI:Notify({
-                    Title = "Animation Detector",
-                    Message = message
-                })
-            end
+            detectorStatusLabel.Text = "Manual timing session stopped."
         end
         RefreshAnimationDetectorPanel()
     end)
 
     local attackButton = CreateDetectorPanelButton(
         detectorPanel,
-        "MarkAttack",
-        "MARK LAST: ATTACK",
+        "MarkAttackStart",
+        "MARK ANIMATION START",
         UDim2.fromOffset(12, 107),
         UDim2.new(0.5, -18, 0, 28),
         Color3.fromRGB(35, 75, 58)
     )
     attackButton.MouseButton1Click:Connect(function()
-        local ok, message = ClassifyLastAnimation("ATTACK")
-        detectorStatusLabel.Text = message
+        if not manualTimingSession then
+            detectorStatusLabel.Text = "Start a timing session first."
+            return
+        end
+
+        manualAttackStartedAt = os.clock()
+        table.insert(manualTimingRecords, {
+            Kind = "ANIMATION START",
+            SessionElapsed = manualAttackStartedAt - manualSessionStartedAt,
+        })
+        detectorStatusLabel.Text = "Animation start marked. Mark when the hit lands."
         RefreshAnimationDetectorPanel()
     end)
 
     local otherButton = CreateDetectorPanelButton(
         detectorPanel,
-        "MarkOther",
-        "MARK LAST: OTHER",
+        "MarkHitLanded",
+        "MARK HIT LANDED",
         UDim2.new(0.5, 6, 0, 107),
         UDim2.new(0.5, -18, 0, 28),
         Color3.fromRGB(82, 58, 43)
     )
     otherButton.MouseButton1Click:Connect(function()
-        local ok, message = ClassifyLastAnimation("OTHER")
-        detectorStatusLabel.Text = message
+        if not manualTimingSession then
+            detectorStatusLabel.Text = "Start a timing session first."
+            return
+        end
+        if not manualAttackStartedAt then
+            detectorStatusLabel.Text = "Mark animation start before marking the hit."
+            return
+        end
+
+        local now = os.clock()
+        local elapsedMs = (now - manualAttackStartedAt) * 1000
+        lastManualTimingMs = elapsedMs
+        table.insert(manualTimingRecords, {
+            Kind = "HIT LANDED",
+            SessionElapsed = now - manualSessionStartedAt,
+            LatencyMs = elapsedMs,
+        })
+        manualAttackStartedAt = nil
+        detectorStatusLabel.Text = string.format("Measured animation-to-hit: %.0f ms", elapsedMs)
         RefreshAnimationDetectorPanel()
     end)
 
     detectorStatsLabel = CreateDetectorPanelLabel(
         detectorPanel,
         "Stats",
-        "Observed: 0 | Attack: 0 | Other: 0 | Unreviewed: 0",
+        "Hits measured: 0 | Last: -- | Average: --",
         UDim2.fromOffset(12, 140),
         UDim2.new(1, -24, 0, 27),
         9
@@ -562,52 +592,49 @@ RefreshAnimationDetectorPanel = function()
         return
     end
 
-    if not RunService:IsStudio() then
-        detectorStatusLabel.Text = "Studio-only: open a place you control in Roblox Studio."
-    elseif animationDetectionEnabled then
-        detectorStatusLabel.Text = "Watching tagged practice NPCs..."
+    if manualTimingSession then
+        detectorStatusLabel.Text = "LIVE MANUAL TIMING | Mark animation, then hit."
     else
-        detectorStatusLabel.Text = "Stopped | Tag a dummy with AXPracticeNPC."
+        detectorStatusLabel.Text = "Ready | Works in live games; marks are manual."
     end
 
-    if animationDetectionEnabled then
-        detectorStartButton.Text = "STOP DETECTOR"
-    else
-        detectorStartButton.Text = "START DETECTOR"
-    end
+    detectorStartButton.Text = manualTimingSession and "STOP TIMING SESSION" or "START TIMING SESSION"
 
-    local attacks, others, unreviewed = 0, 0, 0
+    local hitCount = 0
+    local totalLatency = 0
     local visible = {}
-    local first = math.max(1, #animationEvents - 7)
-    for index, eventRecord in ipairs(animationEvents) do
-        if eventRecord.Classification == "ATTACK" then
-            attacks += 1
-        elseif eventRecord.Classification == "OTHER" then
-            others += 1
-        else
-            unreviewed += 1
+    local first = math.max(1, #manualTimingRecords - 7)
+    for index, record in ipairs(manualTimingRecords) do
+        if record.Kind == "HIT LANDED" and record.LatencyMs then
+            hitCount += 1
+            totalLatency += record.LatencyMs
         end
         if index >= first then
-            table.insert(visible, string.format(
-                "%s | %s | %s | +%.0fms",
-                eventRecord.Classification,
-                eventRecord.Model,
-                tostring(eventRecord.AnimationId),
-                eventRecord.Elapsed * 1000
-            ))
+            if record.LatencyMs then
+                table.insert(visible, string.format(
+                    "HIT LANDED | %.0fms after animation",
+                    record.LatencyMs
+                ))
+            else
+                table.insert(visible, string.format(
+                    "ANIMATION START | +%.2fs",
+                    record.SessionElapsed
+                ))
+            end
         end
     end
 
+    local average = hitCount > 0 and string.format("%.0fms", totalLatency / hitCount) or "--"
+    local latest = lastManualTimingMs and string.format("%.0fms", lastManualTimingMs) or "--"
     detectorStatsLabel.Text = string.format(
-        "Observed: %d | Attack: %d | Other: %d | Unreviewed: %d",
-        #animationEvents,
-        attacks,
-        others,
-        unreviewed
+        "Hits measured: %d | Last: %s | Average: %s",
+        hitCount,
+        latest,
+        average
     )
     detectorLogLabel.Text = #visible > 0
         and table.concat(visible, "\n")
-        or "No events yet. Tag a dummy with AXPracticeNPC."
+        or "Start a session, then mark animation start and hit landed."
 end
 
 CreateAnimationDetectorPanel()
@@ -837,10 +864,10 @@ local buildOk, buildError = xpcall(function()
         end,
     })
 
-    local DetectorSection = FarmTab:CreateSection({Name = "Attack Animation Tester"})
+    local DetectorSection = FarmTab:CreateSection({Name = "Live Attack Timing Tester"})
 
     DetectorSection:CreateButton({
-        Name = "Open Animation Tester Panel",
+        Name = "Open Animation Timing Panel",
         Callback = function()
             if detectorPanel then
                 detectorPanel.Visible = true
@@ -850,7 +877,7 @@ local buildOk, buildError = xpcall(function()
     })
 
     DetectorSection:CreateButton({
-        Name = "Animation Detector Status",
+        Name = "Animation Timing Status",
         Callback = function()
             LucidUI:Notify({
                 Title = "Animation Detector",
