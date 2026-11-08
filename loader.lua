@@ -300,11 +300,55 @@ local function AttachOpponentPlayer(player)
     end
 end
 
+local function IsWorldEventTimerContext(object, playerGui)
+    local blockedWords = {
+        "world", "event", "coin", "gem", "boost", "double", "2x"
+    }
+
+    local function containsBlockedWord(value)
+        local normalized = string.lower(tostring(value or ""))
+        for _, word in ipairs(blockedWords) do
+            if string.find(normalized, word, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local current = object
+    local depth = 0
+    while current and current ~= playerGui and depth < 4 do
+        if containsBlockedWord(current.Name) then
+            return true
+        end
+
+        -- Event panels commonly place their title and countdown as siblings.
+        if current.Parent then
+            for _, sibling in ipairs(current.Parent:GetChildren()) do
+                if sibling ~= object
+                    and (sibling:IsA("TextLabel") or sibling:IsA("TextButton") or sibling:IsA("TextBox"))
+                    and containsBlockedWord(sibling.Text) then
+                    return true
+                end
+            end
+        end
+
+        current = current.Parent
+        depth += 1
+    end
+
+    return false
+end
+
 local function IsMatchTimerVisible()
     local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then
-        return false, nil
+    local camera = Workspace.CurrentCamera
+    if not playerGui or not camera then
+        return false, nil, "PlayerGui or camera unavailable"
     end
+
+    local viewport = camera.ViewportSize
+    local candidates = {}
 
     for _, object in ipairs(playerGui:GetDescendants()) do
         if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
@@ -325,14 +369,50 @@ local function IsMatchTimerVisible()
                     ancestor = ancestor.Parent
                 end
 
-                if visible then
-                    return true, timerText
+                if visible and not IsWorldEventTimerContext(object, playerGui) then
+                    local center = object.AbsolutePosition + object.AbsoluteSize / 2
+                    local normalizedX = center.X / math.max(viewport.X, 1)
+                    local normalizedY = center.Y / math.max(viewport.Y, 1)
+                    local normalizedWidth = object.AbsoluteSize.X / math.max(viewport.X, 1)
+                    local normalizedHeight = object.AbsoluteSize.Y / math.max(viewport.Y, 1)
+
+                    -- The match clock in the supplied HUD is in the upper-center area.
+                    -- Require a reasonably sized label there to reject most event timers.
+                    local inMatchClockZone = normalizedX >= 0.38
+                        and normalizedX <= 0.80
+                        and normalizedY <= 0.18
+                        and normalizedWidth >= 0.045
+                        and normalizedHeight >= 0.025
+
+                    if inMatchClockZone then
+                        table.insert(candidates, {
+                            Text = timerText,
+                            X = normalizedX,
+                            Y = normalizedY,
+                        })
+                    end
                 end
             end
         end
     end
 
-    return false, nil
+    if #candidates > 0 then
+        table.sort(candidates, function(a, b)
+            local aScore = math.abs(a.X - 0.60) + a.Y
+            local bScore = math.abs(b.X - 0.60) + b.Y
+            return aScore < bScore
+        end)
+
+        local best = candidates[1]
+        return true, best.Text, string.format(
+            "HUD clock %s at %.2f, %.2f",
+            best.Text,
+            best.X,
+            best.Y
+        )
+    end
+
+    return false, nil, "No match clock found in upper-center HUD zone"
 end
 
 local function DetachOpponentPlayer(player)
@@ -722,9 +802,9 @@ RefreshAnimationDetectorPanel = function()
     if not animationDetectionEnabled then
         detectorStatusLabel.Text = "Stopped | Start to watch opponent animations."
     elseif matchIsActive then
-        detectorStatusLabel.Text = "Match timer detected | Monitoring opponents."
+        detectorStatusLabel.Text = "Match HUD clock detected | Monitoring opponents."
     else
-        detectorStatusLabel.Text = "Waiting for match timer | Lobby paused."
+        detectorStatusLabel.Text = "Waiting for match HUD clock | Lobby paused."
     end
 
     detectorStartButton.Text = animationDetectionEnabled and "STOP MONITOR" or "START MONITOR"
