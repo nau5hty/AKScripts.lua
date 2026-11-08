@@ -167,10 +167,12 @@ local matchPollConnection = nil
 local matchPollElapsed = 0
 local animationAnimatorConnections = {}
 local animationModelConnections = {}
+local animationBotModelConnections = {}
 local animationPlayerConnections = {}
+local animationWorkspaceAddedConnection = nil
 local animationPlayersAddedConnection = nil
 local animationPlayersRemovingConnection = nil
--- animationEvents stores one catalogue row per player + animation ID.
+-- animationEvents stores one catalogue row per actor + animation ID (player or bot).
 local animationEvents = {}
 local animationCatalogueByKey = {}
 local animationClassesById = {}
@@ -194,23 +196,33 @@ local function IsOpponentCharacter(player, character)
         and player.Character == character
 end
 
-local function RecordOpponentAnimation(player, track, source)
-    if not animationDetectionEnabled or not matchIsActive or not player or player == LocalPlayer then
+local function RecordCharacterAnimation(player, character, track, source)
+    if not animationDetectionEnabled or not matchIsActive then
+        return
+    end
+
+    if player == LocalPlayer or (not player and not character) then
         return
     end
 
     local animation = track and track.Animation
     local animationId = animation and animation.AnimationId or "Unknown"
-    local playerId = player.UserId or player.Name
-    local catalogueKey = tostring(playerId) .. "|" .. tostring(animationId)
+    local actorType = player and "PLAYER" or "BOT"
+    local actorName = player and player.Name or character.Name
+    local actorKey = player
+        and ("PLAYER:" .. tostring(player.UserId))
+        or ("BOT:" .. character:GetFullName())
+    local catalogueKey = actorKey .. "|" .. tostring(animationId)
     local nowElapsed = os.clock() - animationDetectionStartedAt
     local eventRecord = animationCatalogueByKey[catalogueKey]
     local isNewEntry = eventRecord == nil
 
     if isNewEntry then
         eventRecord = {
-            Player = player.Name,
-            UserId = playerId,
+            Player = actorName,
+            ActorType = actorType,
+            ActorKey = actorKey,
+            UserId = player and player.UserId or nil,
             AnimationId = animationId,
             Classification = animationClassesById[animationId] or "UNREVIEWED",
             FirstElapsed = nowElapsed,
@@ -224,10 +236,10 @@ local function RecordOpponentAnimation(player, track, source)
         animationCatalogueByKey[catalogueKey] = eventRecord
         table.insert(animationEvents, eventRecord)
 
-        -- Keep the catalogue bounded while allowing more entries than the old event log.
+        -- Keep the catalogue bounded while allowing entries from players and bots.
         if #animationEvents > 120 then
             local removed = table.remove(animationEvents, 1)
-            local removedKey = tostring(removed.UserId or removed.Player)
+            local removedKey = tostring(removed.ActorKey)
                 .. "|" .. tostring(removed.AnimationId)
             if animationCatalogueByKey[removedKey] == removed then
                 animationCatalogueByKey[removedKey] = nil
@@ -235,8 +247,9 @@ local function RecordOpponentAnimation(player, track, source)
         end
 
         print(string.format(
-            "[AXScripts Animation Monitor] NEW | Player=%s | ID=%s | %s | priority=%s | length=%.2fs",
-            eventRecord.Player,
+            "[AXScripts Animation Monitor] NEW | %s=%s | ID=%s | %s | priority=%s | length=%.2fs",
+            actorType,
+            actorName,
             tostring(animationId),
             eventRecord.Classification,
             eventRecord.Priority,
@@ -272,13 +285,14 @@ local function AttachOpponentAnimator(player, character, animator)
     end
 
     local connection = animator.AnimationPlayed:Connect(function(track)
-        RecordOpponentAnimation(player, track, "LIVE")
+        RecordCharacterAnimation(player, character, track, "LIVE")
     end)
 
     animationAnimatorConnections[animator] = {
         Connection = connection,
         Player = player,
         Character = character,
+        ActorType = "PLAYER",
     }
 
     -- Intentionally do not snapshot already-playing tracks here.
@@ -324,6 +338,121 @@ local function AttachOpponentPlayer(player)
 
     if matchIsActive and player.Character then
         AttachOpponentCharacter(player, player.Character)
+    end
+end
+
+local function GetBotCharacterFromDescendant(descendant)
+    local current = descendant
+    while current and current ~= Workspace do
+        if current:IsA("Model")
+            and current:FindFirstChildOfClass("Humanoid")
+            and Players:GetPlayerFromCharacter(current) == nil
+            and current ~= LocalPlayer.Character then
+            return current
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+local function AttachBotAnimator(character, animator)
+    if not animationDetectionEnabled
+        or not matchIsActive
+        or not character
+        or Players:GetPlayerFromCharacter(character) ~= nil
+        or not animator:IsA("Animator")
+        or animationAnimatorConnections[animator] then
+        return
+    end
+
+    local connection = animator.AnimationPlayed:Connect(function(track)
+        RecordCharacterAnimation(nil, character, track, "LIVE")
+    end)
+
+    animationAnimatorConnections[animator] = {
+        Connection = connection,
+        Player = nil,
+        Character = character,
+        BotCharacter = character,
+        ActorType = "BOT",
+    }
+end
+
+local function DetachBotCharacter(character)
+    local connections = animationBotModelConnections[character]
+    if connections then
+        for _, connection in pairs(connections) do
+            connection:Disconnect()
+        end
+        animationBotModelConnections[character] = nil
+    end
+
+    for animator, entry in pairs(animationAnimatorConnections) do
+        if entry.BotCharacter == character then
+            entry.Connection:Disconnect()
+            animationAnimatorConnections[animator] = nil
+        end
+    end
+end
+
+local function AttachBotCharacter(character)
+    if not animationDetectionEnabled
+        or not matchIsActive
+        or not character
+        or not character:IsA("Model")
+        or not character:IsDescendantOf(Workspace)
+        or not character:FindFirstChildOfClass("Humanoid")
+        or Players:GetPlayerFromCharacter(character) ~= nil
+        or character == LocalPlayer.Character
+        or animationBotModelConnections[character] then
+        return
+    end
+
+    local connections = {}
+    animationBotModelConnections[character] = connections
+
+    for _, descendant in ipairs(character:GetDescendants()) do
+        if descendant:IsA("Animator") then
+            AttachBotAnimator(character, descendant)
+        end
+    end
+
+    connections.DescendantAdded = character.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("Animator") then
+            AttachBotAnimator(character, descendant)
+        end
+    end)
+
+    connections.AncestryChanged = character.AncestryChanged:Connect(function()
+        if not character:IsDescendantOf(Workspace) then
+            DetachBotCharacter(character)
+        end
+    end)
+end
+
+local function AttachAllBotCharacters()
+    if not animationDetectionEnabled or not matchIsActive then
+        return
+    end
+
+    for _, descendant in ipairs(Workspace:GetDescendants()) do
+        if descendant:IsA("Animator") then
+            local botCharacter = GetBotCharacterFromDescendant(descendant)
+            if botCharacter then
+                AttachBotCharacter(botCharacter)
+            end
+        end
+    end
+end
+
+local function DetachAllBotCharacters()
+    local characters = {}
+    for character in pairs(animationBotModelConnections) do
+        table.insert(characters, character)
+    end
+
+    for _, character in ipairs(characters) do
+        DetachBotCharacter(character)
     end
 end
 
@@ -503,6 +632,12 @@ local function StopAnimationDetector()
         animationPlayersRemovingConnection = nil
     end
 
+    if animationWorkspaceAddedConnection then
+        animationWorkspaceAddedConnection:Disconnect()
+        animationWorkspaceAddedConnection = nil
+    end
+
+    DetachAllBotCharacters()
     RefreshAnimationDetectorPanel()
 end
 
@@ -521,6 +656,19 @@ local function StartAnimationDetector()
 
     for _, player in ipairs(Players:GetPlayers()) do
         AttachOpponentPlayer(player)
+    end
+
+    animationWorkspaceAddedConnection = Workspace.DescendantAdded:Connect(function(descendant)
+        if animationDetectionEnabled and matchIsActive then
+            local botCharacter = GetBotCharacterFromDescendant(descendant)
+            if botCharacter then
+                AttachBotCharacter(botCharacter)
+            end
+        end
+    end)
+
+    if matchIsActive then
+        AttachAllBotCharacters()
     end
 
     animationPlayersAddedConnection = Players.PlayerAdded:Connect(function(player)
@@ -550,11 +698,13 @@ local function StartAnimationDetector()
                 for _, player in ipairs(Players:GetPlayers()) do
                     AttachOpponentPlayer(player)
                 end
-                detectorStatusLabel.Text = "Match timer found. Monitoring opponent animations."
+                AttachAllBotCharacters()
+                detectorStatusLabel.Text = "Match timer found. Monitoring players and bots."
             else
                 for _, player in ipairs(Players:GetPlayers()) do
                     DetachOpponentPlayer(player)
                 end
+                DetachAllBotCharacters()
                 detectorStatusLabel.Text = "Match timer hidden. Lobby monitoring paused."
             end
 
@@ -593,6 +743,8 @@ end
 
 local function GetAnimationDetectorStatus()
     local attackCount, otherCount, unreviewedCount = 0, 0, 0
+    local playerEntries, botEntries = 0, 0
+
     for _, eventRecord in ipairs(animationEvents) do
         if eventRecord.Classification == "ATTACK" then
             attackCount += 1
@@ -601,13 +753,21 @@ local function GetAnimationDetectorStatus()
         else
             unreviewedCount += 1
         end
+
+        if eventRecord.ActorType == "BOT" then
+            botEntries += 1
+        else
+            playerEntries += 1
+        end
     end
 
     local lastId = lastAnimationEvent and lastAnimationEvent.AnimationId or "none"
     return string.format(
-        "Plays: %d | Entries: %d | Attack: %d | Other: %d | Unreviewed: %d | Last: %s",
+        "Plays: %d | Unique: %d (P:%d B:%d) | Attack: %d | Other: %d | New: %d | Last: %s",
         animationTotalPlays,
         #animationEvents,
+        playerEntries,
+        botEntries,
         attackCount,
         otherCount,
         unreviewedCount,
@@ -834,7 +994,7 @@ RefreshAnimationDetectorPanel = function()
     if not animationDetectionEnabled then
         detectorStatusLabel.Text = "Stopped | Start to watch opponent animations."
     elseif matchIsActive then
-        detectorStatusLabel.Text = "Match HUD clock detected | Monitoring animations."
+        detectorStatusLabel.Text = "Match HUD clock detected | Monitoring players + bots."
     else
         detectorStatusLabel.Text = "Waiting for match HUD clock | Lobby paused."
     end
@@ -863,8 +1023,9 @@ RefreshAnimationDetectorPanel = function()
     for index = 1, math.min(8, #recent) do
         local eventRecord = recent[index]
         table.insert(visible, string.format(
-            "%s | %s | %s | x%d",
+            "%s | %s:%s | %s | x%d",
             eventRecord.Classification,
+            eventRecord.ActorType or "PLAYER",
             eventRecord.Player,
             tostring(eventRecord.AnimationId),
             eventRecord.Count or 1
@@ -872,12 +1033,24 @@ RefreshAnimationDetectorPanel = function()
     end
 
     detectorStatsLabel.Text = string.format(
-        "Plays: %d | Unique: %d | ATK: %d | Other: %d | New: %d",
+        "Plays: %d | Unique: %d | P:%d B:%d | ATK:%d",
         animationTotalPlays,
         #animationEvents,
-        attacks,
-        others,
-        unreviewed
+        (function()
+            local count = 0
+            for _, eventRecord in ipairs(animationEvents) do
+                if eventRecord.ActorType ~= "BOT" then count += 1 end
+            end
+            return count
+        end)(),
+        (function()
+            local count = 0
+            for _, eventRecord in ipairs(animationEvents) do
+                if eventRecord.ActorType == "BOT" then count += 1 end
+            end
+            return count
+        end)(),
+        attacks
     )
     detectorLogLabel.Text = #visible > 0
         and table.concat(visible, "\n")
