@@ -3,6 +3,30 @@ local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
+-- Visible startup diagnostics: this remains independent of LucidUI.
+local DiagnosticGui = Instance.new("ScreenGui")
+DiagnosticGui.Name = "AXScripts_Diagnostics"
+DiagnosticGui.ResetOnSpawn = false
+DiagnosticGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local DiagnosticLabel = Instance.new("TextLabel")
+DiagnosticLabel.Size = UDim2.fromOffset(300, 58)
+DiagnosticLabel.Position = UDim2.new(0.5, -150, 0, 18)
+DiagnosticLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+DiagnosticLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+DiagnosticLabel.TextWrapped = true
+DiagnosticLabel.TextSize = 14
+DiagnosticLabel.Font = Enum.Font.GothamBold
+DiagnosticLabel.Text = "AXScripts: starting loader..."
+DiagnosticLabel.Parent = DiagnosticGui
+
+local function SetDiagnostic(message)
+    DiagnosticLabel.Text = "AXScripts: " .. message
+    warn("[AXScripts] " .. message)
+end
+
+SetDiagnostic("diagnostics active; loading LucidUI")
+
 if _G.AKScriptsLoaded then
     pcall(function() _G.AKScriptsLoaded() end)
 end
@@ -14,9 +38,11 @@ local success, LucidUI = pcall(function()
 end)
 
 if not success or not LucidUI then
-    warn("Failed to load LucidUI library.")
+    SetDiagnostic("LucidUI load failed: " .. tostring(LucidUI))
     return
 end
+
+SetDiagnostic("LucidUI loaded; creating window")
 
 -- // Services \\ --
 local RunService = game:GetService("RunService")
@@ -121,14 +147,32 @@ local function SimulateKeyPress(keyCode)
 end
 
 -- // Window Setup \\ --
-local Window = LucidUI:CreateWindow({
-    Name = "AKScripts",
-    Size = UDim2.new(0, 260, 0, 160),
-    CompactMode = true,
-    Theme = "Void"
-})
+local windowOk, Window = pcall(function()
+    return LucidUI:CreateWindow({
+        Name = "AKScripts",
+        Size = UDim2.new(0, 260, 0, 160),
+        CompactMode = true,
+        Theme = "Void"
+    })
+end)
 
-Window:BuildSettingsPanel()
+if not windowOk or not Window then
+    SetDiagnostic("CreateWindow failed: " .. tostring(Window))
+    return
+end
+
+SetDiagnostic("window created; building settings panel")
+
+local settingsOk, settingsError = pcall(function()
+    Window:BuildSettingsPanel()
+end)
+
+if not settingsOk then
+    SetDiagnostic("settings panel error: " .. tostring(settingsError))
+    return
+end
+
+SetDiagnostic("settings built; creating tabs")
 
 pcall(function()
     if LucidUI.SetTheme then
@@ -215,6 +259,8 @@ UserInputService.JumpRequest:Connect(function()
 end)
 
 -- // Main Tab \\ --
+SetDiagnostic("Main tab created")
+
 local MainTab = Window:CreateTab({
     Name = "Main",
     Icon = "zap"
@@ -259,6 +305,8 @@ MainSection:CreateToggle({
 })
 
 -- // Visuals Tab \\ --
+SetDiagnostic("Visuals tab created")
+
 local VisualsTab = Window:CreateTab({
     Name = "Visuals",
     Icon = "eye"
@@ -295,6 +343,8 @@ VisualsSection:CreateSlider({
 })
 
 -- // Farm Tab (Optimized Auto-Fight & Dynamic Engine) \\ --
+SetDiagnostic("Farm tab created")
+
 local FarmTab = Window:CreateTab({
     Name = "Farm",
     Icon = "sprout"
@@ -490,6 +540,8 @@ FarmSection:CreateSlider({
 })
 
 -- // Troll Tab \\ --
+SetDiagnostic("Troll tab created")
+
 local TrollTab = Window:CreateTab({
     Name = "Troll",
     Icon = "laugh"
