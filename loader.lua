@@ -5,6 +5,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
@@ -157,6 +158,179 @@ local smartBlockEnabled = false
 local autoCounterEnabled = false
 local autoFightElapsed = 0
 local autoFightStatus = "Waiting for game combat integration"
+
+-- Animation detector is limited to tagged practice NPCs in Roblox Studio.
+local PRACTICE_NPC_TAG = "AXPracticeNPC"
+local animationDetectionEnabled = false
+local animationAnimatorConnections = {}
+local animationModelConnections = {}
+local animationTagAddedConnection = nil
+local animationEvents = {}
+local animationClassesById = {}
+local lastAnimationEvent = nil
+local animationDetectionStartedAt = 0
+
+local function IsPracticeNPC(model)
+    return typeof(model) == "Instance"
+        and model:IsA("Model")
+        and model:IsDescendantOf(Workspace)
+        and CollectionService:HasTag(model, PRACTICE_NPC_TAG)
+        and Players:GetPlayerFromCharacter(model) == nil
+end
+
+local function RecordPracticeAnimation(model, track)
+    if not animationDetectionEnabled or not IsPracticeNPC(model) then
+        return
+    end
+
+    local animation = track and track.Animation
+    local animationId = animation and animation.AnimationId or "Unknown"
+    local classification = animationClassesById[animationId] or "UNREVIEWED"
+    local eventRecord = {
+        Model = model.Name,
+        AnimationId = animationId,
+        Classification = classification,
+        Elapsed = os.clock() - animationDetectionStartedAt,
+        Priority = track and track.Priority and track.Priority.Name or "Unknown",
+        Length = track and tonumber(track.Length) or 0,
+    }
+
+    table.insert(animationEvents, eventRecord)
+    lastAnimationEvent = eventRecord
+
+    print(string.format(
+        "[AXScripts Detector] %s | NPC=%s | ID=%s | t=%.0fms | priority=%s | length=%.2fs",
+        classification,
+        eventRecord.Model,
+        tostring(animationId),
+        eventRecord.Elapsed * 1000,
+        eventRecord.Priority,
+        eventRecord.Length
+    ))
+end
+
+local function AttachPracticeAnimator(model, animator)
+    if not animationDetectionEnabled
+        or not IsPracticeNPC(model)
+        or not animator:IsA("Animator")
+        or animationAnimatorConnections[animator] then
+        return
+    end
+
+    animationAnimatorConnections[animator] = animator.AnimationPlayed:Connect(function(track)
+        RecordPracticeAnimation(model, track)
+    end)
+end
+
+local function AttachPracticeNPC(model)
+    if not animationDetectionEnabled or not IsPracticeNPC(model) or animationModelConnections[model] then
+        return
+    end
+
+    local modelConnections = {}
+    animationModelConnections[model] = modelConnections
+
+    for _, descendant in ipairs(model:GetDescendants()) do
+        if descendant:IsA("Animator") then
+            AttachPracticeAnimator(model, descendant)
+        end
+    end
+
+    modelConnections.DescendantAdded = model.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("Animator") then
+            AttachPracticeAnimator(model, descendant)
+        end
+    end)
+end
+
+local function StopAnimationDetector()
+    animationDetectionEnabled = false
+
+    for _, connection in pairs(animationAnimatorConnections) do
+        connection:Disconnect()
+    end
+    table.clear(animationAnimatorConnections)
+
+    for _, connections in pairs(animationModelConnections) do
+        for _, connection in pairs(connections) do
+            connection:Disconnect()
+        end
+    end
+    table.clear(animationModelConnections)
+
+    if animationTagAddedConnection then
+        animationTagAddedConnection:Disconnect()
+        animationTagAddedConnection = nil
+    end
+end
+
+local function StartAnimationDetector()
+    if not RunService:IsStudio() then
+        return false, "Studio-only: use this tester in a place you control."
+    end
+
+    StopAnimationDetector()
+    table.clear(animationEvents)
+    lastAnimationEvent = nil
+    animationDetectionStartedAt = os.clock()
+    animationDetectionEnabled = true
+
+    for _, model in ipairs(CollectionService:GetTagged(PRACTICE_NPC_TAG)) do
+        AttachPracticeNPC(model)
+    end
+
+    animationTagAddedConnection = CollectionService:GetInstanceAddedSignal(PRACTICE_NPC_TAG):Connect(function(instance)
+        if instance:IsA("Model") then
+            AttachPracticeNPC(instance)
+        end
+    end)
+
+    return true, "Watching tagged practice NPCs."
+end
+
+local function ClassifyLastAnimation(classification)
+    if not lastAnimationEvent then
+        return false, "No animation has been observed yet."
+    end
+
+    local animationId = lastAnimationEvent.AnimationId
+    if animationId == "Unknown" then
+        return false, "The last animation has no readable asset ID."
+    end
+
+    animationClassesById[animationId] = classification
+    for _, eventRecord in ipairs(animationEvents) do
+        if eventRecord.AnimationId == animationId then
+            eventRecord.Classification = classification
+        end
+    end
+
+    lastAnimationEvent.Classification = classification
+    return true, "Saved " .. classification .. " label for " .. animationId
+end
+
+local function GetAnimationDetectorStatus()
+    local attackCount, otherCount, unreviewedCount = 0, 0, 0
+    for _, eventRecord in ipairs(animationEvents) do
+        if eventRecord.Classification == "ATTACK" then
+            attackCount += 1
+        elseif eventRecord.Classification == "OTHER" then
+            otherCount += 1
+        else
+            unreviewedCount += 1
+        end
+    end
+
+    local lastId = lastAnimationEvent and lastAnimationEvent.AnimationId or "none"
+    return string.format(
+        "Observed: %d | Attack labels: %d | Other labels: %d | Unreviewed: %d | Last ID: %s",
+        #animationEvents,
+        attackCount,
+        otherCount,
+        unreviewedCount,
+        tostring(lastId)
+    )
+end
 
 local function CountPracticeDummies()
     local count = 0
@@ -383,6 +557,67 @@ local buildOk, buildError = xpcall(function()
         end,
     })
 
+    local DetectorSection = FarmTab:CreateSection({Name = "Attack Animation Tester (Studio NPCs)"})
+
+    DetectorSection:CreateToggle({
+        Name = "Watch Tagged Practice NPCs",
+        Default = false,
+        Callback = function(state)
+            if state then
+                local started, message = StartAnimationDetector()
+                if not started then
+                    LucidUI:Notify({
+                        Title = "Animation Detector",
+                        Message = message
+                    })
+                    return
+                end
+                LucidUI:Notify({
+                    Title = "Animation Detector",
+                    Message = message .. " Tag dummy Models with AXPracticeNPC."
+                })
+            else
+                StopAnimationDetector()
+                LucidUI:Notify({
+                    Title = "Animation Detector",
+                    Message = "Detector stopped."
+                })
+            end
+        end,
+    })
+
+    DetectorSection:CreateButton({
+        Name = "Mark Last Animation: ATTACK",
+        Callback = function()
+            local ok, message = ClassifyLastAnimation("ATTACK")
+            LucidUI:Notify({
+                Title = "Animation Label",
+                Message = message
+            })
+        end,
+    })
+
+    DetectorSection:CreateButton({
+        Name = "Mark Last Animation: OTHER",
+        Callback = function()
+            local ok, message = ClassifyLastAnimation("OTHER")
+            LucidUI:Notify({
+                Title = "Animation Label",
+                Message = message
+            })
+        end,
+    })
+
+    DetectorSection:CreateButton({
+        Name = "Animation Detector Status",
+        Callback = function()
+            LucidUI:Notify({
+                Title = "Animation Detector",
+                Message = GetAnimationDetectorStatus()
+            })
+        end,
+    })
+
     FarmSection:CreateSlider({
         Name = "Practice Range",
         Min = 5,
@@ -438,6 +673,7 @@ _G.AKScriptsLoaded = function()
         monitorConnection:Disconnect()
         monitorConnection = nil
     end
+    StopAnimationDetector()
     if previousCleanup then
         pcall(previousCleanup)
     end
