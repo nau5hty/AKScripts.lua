@@ -159,7 +159,7 @@ local function renderPage()
         table.insert(pageLines, allLines[index])
     end
 
-    outputText.Text = #pageLines > 0 and table.concat(pageLines, "\\n")
+    outputText.Text = #pageLines > 0 and table.concat(pageLines, "\n")
         or "No diagnostic data yet."
 
     pageLabel.Text = string.format("Page %d/%d", currentPage, totalPages)
