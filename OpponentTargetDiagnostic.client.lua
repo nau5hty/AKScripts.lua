@@ -555,6 +555,78 @@ local function getOwnDuelStandSummary()
     return lines
 end
 
+
+local function getNonPlayerControllerCandidates()
+    local localRoot = LocalPlayer.Character and findModelRoot(LocalPlayer.Character)
+    if not localRoot then
+        return {}, "Your character root part was not found."
+    end
+
+    local candidates = {}
+    local seen = {}
+
+    for _, object in ipairs(Workspace:GetDescendants()) do
+        if object:IsA("Model") and object ~= LocalPlayer.Character and not seen[object] then
+            local humanoid = object:FindFirstChildWhichIsA("Humanoid", true)
+            local animationController = object:FindFirstChildWhichIsA("AnimationController", true)
+            local animator = object:FindFirstChildWhichIsA("Animator", true)
+
+            if humanoid or animationController or animator then
+                local linkedPlayer = Players:GetPlayerFromCharacter(object)
+                if not linkedPlayer then
+                    local root = findModelRoot(object)
+                    local position = root and root.Position
+
+                    if not position then
+                        local ok, pivot = pcall(function()
+                            return object:GetPivot()
+                        end)
+                        if ok and pivot then
+                            position = pivot.Position
+                        end
+                    end
+
+                    if not position then
+                        local anyPart = object:FindFirstChildWhichIsA("BasePart", true)
+                        position = anyPart and anyPart.Position
+                    end
+
+                    if position then
+                        local distance = (position - localRoot.Position).Magnitude
+                        if distance <= SCAN_RADIUS then
+                            seen[object] = true
+
+                            local controllerType = {}
+                            if humanoid then table.insert(controllerType, "Humanoid") end
+                            if animationController then table.insert(controllerType, "AnimationController") end
+                            if animator then table.insert(controllerType, "Animator") end
+
+                            local health = "--"
+                            if humanoid then
+                                health = string.format("%.0f/%.0f", humanoid.Health, humanoid.MaxHealth)
+                            end
+
+                            table.insert(candidates, {
+                                path = object:GetFullName(),
+                                name = object.Name,
+                                distance = distance,
+                                controllers = table.concat(controllerType, "+"),
+                                health = health
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(candidates, function(a, b)
+        return a.distance < b.distance
+    end)
+
+    return candidates
+end
+
 local function refresh()
     local lines = {}
     table.insert(lines, "READ-ONLY DIAGNOSTIC - no combat actions")
@@ -627,6 +699,30 @@ local function refresh()
 
         if checkedNames == 0 then
             table.insert(lines, "  No nearby Humanoid display names available.")
+        end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "NON-PLAYER CONTROLLER CANDIDATES:")
+    local npcCandidates, npcError = getNonPlayerControllerCandidates()
+    if npcError then
+        table.insert(lines, "  " .. npcError)
+    elseif #npcCandidates == 0 then
+        table.insert(lines, "  No nearby non-player controller models found.")
+    else
+        for index = 1, math.min(#npcCandidates, 10) do
+            local item = npcCandidates[index]
+            table.insert(lines, string.format(
+                "  %d) %s | %s | %.0f studs | HP %s",
+                index,
+                item.path,
+                item.controllers,
+                item.distance,
+                item.health
+            ))
+        end
+        if #npcCandidates > 10 then
+            table.insert(lines, "  ... plus " .. tostring(#npcCandidates - 10) .. " more candidates.")
         end
     end
 
