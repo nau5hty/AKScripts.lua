@@ -246,17 +246,9 @@ local function AttachOpponentAnimator(player, character, animator)
         Character = character,
     }
 
-    -- Snapshot current tracks separately so they are not mistaken for fresh starts.
-    local ok, tracks = pcall(function()
-        return animator:GetPlayingAnimationTracks()
-    end)
-    if ok and type(tracks) == "table" then
-        for _, track in ipairs(tracks) do
-            if track and track.IsPlaying then
-                RecordOpponentAnimation(player, track, "ACTIVE")
-            end
-        end
-    end
+    -- Intentionally do not snapshot already-playing tracks here.
+    -- The monitor records only AnimationPlayed events that begin after attachment,
+    -- avoiding a burst of old/current server animations when the match timer appears.
 end
 
 local function AttachOpponentCharacter(player, character)
