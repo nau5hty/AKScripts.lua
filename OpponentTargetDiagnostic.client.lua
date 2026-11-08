@@ -145,7 +145,7 @@ outputText.Parent = output
 
 local allLines = {}
 local currentPage = 1
-local LINES_PER_PAGE = 5
+local LINES_PER_PAGE = 18
 
 local function renderPage()
     local totalPages = math.max(1, math.ceil(#allLines / LINES_PER_PAGE))
