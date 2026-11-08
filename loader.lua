@@ -165,6 +165,7 @@ local animationDetectionEnabled = false
 local matchIsActive = false
 local matchPollConnection = nil
 local matchPollElapsed = 0
+local animationPlayerRange = 120
 local animationAnimatorConnections = {}
 local animationModelConnections = {}
 local animationBotModelConnections = {}
@@ -189,11 +190,23 @@ local detectorDragConnections = {}
 local RefreshAnimationDetectorPanel = function() end
 
 local function IsOpponentCharacter(player, character)
-    return player ~= nil
-        and player ~= LocalPlayer
-        and character ~= nil
-        and character:IsA("Model")
-        and player.Character == character
+    if player == nil
+        or player == LocalPlayer
+        or character == nil
+        or not character:IsA("Model")
+        or player.Character ~= character then
+        return false
+    end
+
+    local localCharacter = LocalPlayer.Character
+    local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+    local targetRoot = character:FindFirstChild("HumanoidRootPart")
+
+    if not localRoot or not targetRoot then
+        return false
+    end
+
+    return (targetRoot.Position - localRoot.Position).Magnitude <= animationPlayerRange
 end
 
 local function RecordCharacterAnimation(player, character, track, source)
@@ -341,11 +354,23 @@ local function AttachOpponentPlayer(player)
     end
 end
 
+local function HasBotAnimationController(model)
+    if not model or not model:IsA("Model") then
+        return false
+    end
+
+    return model:FindFirstChildOfClass("Humanoid") ~= nil
+        or model:FindFirstChildWhichIsA("AnimationController", true) ~= nil
+end
+
 local function GetBotCharacterFromDescendant(descendant)
     local current = descendant
+    if current and not current:IsA("Model") then
+        current = current.Parent
+    end
+
     while current and current ~= Workspace do
-        if current:IsA("Model")
-            and current:FindFirstChildOfClass("Humanoid")
+        if HasBotAnimationController(current)
             and Players:GetPlayerFromCharacter(current) == nil
             and current ~= LocalPlayer.Character then
             return current
@@ -401,7 +426,7 @@ local function AttachBotCharacter(character)
         or not character
         or not character:IsA("Model")
         or not character:IsDescendantOf(Workspace)
-        or not character:FindFirstChildOfClass("Humanoid")
+        or not HasBotAnimationController(character)
         or Players:GetPlayerFromCharacter(character) ~= nil
         or character == LocalPlayer.Character
         or animationBotModelConnections[character] then
@@ -436,11 +461,8 @@ local function AttachAllBotCharacters()
     end
 
     for _, descendant in ipairs(Workspace:GetDescendants()) do
-        if descendant:IsA("Animator") then
-            local botCharacter = GetBotCharacterFromDescendant(descendant)
-            if botCharacter then
-                AttachBotCharacter(botCharacter)
-            end
+        if descendant:IsA("Model") and HasBotAnimationController(descendant) then
+            AttachBotCharacter(descendant)
         end
     end
 end
@@ -572,12 +594,35 @@ local function IsMatchTimerVisible()
     return false, nil, "No match clock found in upper-center HUD zone"
 end
 
+local function DetachOpponentCharacter(player, character)
+    if not character then
+        return
+    end
+
+    local connections = animationModelConnections[character]
+    if connections then
+        for _, connection in pairs(connections) do
+            connection:Disconnect()
+        end
+        animationModelConnections[character] = nil
+    end
+
+    for animator, entry in pairs(animationAnimatorConnections) do
+        if entry.Player == player and entry.Character == character then
+            entry.Connection:Disconnect()
+            animationAnimatorConnections[animator] = nil
+        end
+    end
+end
+
 local function DetachOpponentPlayer(player)
     local playerConnection = animationPlayerConnections[player]
     if playerConnection then
         playerConnection:Disconnect()
         animationPlayerConnections[player] = nil
     end
+
+    DetachOpponentCharacter(player, player.Character)
 
     for character, connections in pairs(animationModelConnections) do
         if Players:GetPlayerFromCharacter(character) == player then
@@ -659,7 +704,11 @@ local function StartAnimationDetector()
     end
 
     animationWorkspaceAddedConnection = Workspace.DescendantAdded:Connect(function(descendant)
-        if animationDetectionEnabled and matchIsActive then
+        if animationDetectionEnabled and matchIsActive
+            and (descendant:IsA("Model")
+                or descendant:IsA("Animator")
+                or descendant:IsA("Humanoid")
+                or descendant:IsA("AnimationController")) then
             local botCharacter = GetBotCharacterFromDescendant(descendant)
             if botCharacter then
                 AttachBotCharacter(botCharacter)
@@ -699,7 +748,7 @@ local function StartAnimationDetector()
                     AttachOpponentPlayer(player)
                 end
                 AttachAllBotCharacters()
-                detectorStatusLabel.Text = "Match timer found. Monitoring players and bots."
+                detectorStatusLabel.Text = "Match timer found. Monitoring nearby players and bots."
             else
                 for _, player in ipairs(Players:GetPlayers()) do
                     DetachOpponentPlayer(player)
@@ -709,6 +758,19 @@ local function StartAnimationDetector()
             end
 
             RefreshAnimationDetectorPanel()
+        end
+
+        -- Re-check distance while the match is active so distant server players
+        -- are detached and players entering range are attached.
+        if matchIsActive then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    AttachOpponentPlayer(player)
+                    if player.Character and not IsOpponentCharacter(player, player.Character) then
+                        DetachOpponentCharacter(player, player.Character)
+                    end
+                end
+            end
         end
     end)
 
@@ -1284,6 +1346,16 @@ local buildOk, buildError = xpcall(function()
     })
 
     local DetectorSection = FarmTab:CreateSection({Name = "Opponent Animation Monitor"})
+
+    DetectorSection:CreateSlider({
+        Name = "Nearby Player Range",
+        Min = 40,
+        Max = 300,
+        Default = 120,
+        Callback = function(value)
+            animationPlayerRange = value
+        end,
+    })
 
     DetectorSection:CreateButton({
         Name = "Open Opponent Animation Panel",
