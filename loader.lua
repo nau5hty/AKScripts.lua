@@ -262,16 +262,53 @@ TrollSection:CreateToggle({
     end,
 })
 
--- // Fling Nearby (Unavailable) \\ --
-TrollSection:CreateToggle({
-    Name = "Fling Nearby (Unavailable)",
-    Default = false,
-    Callback = function(state)
-        if state then
-            LucidUI:Notify({
-                Title = "Feature Unavailable",
-                Message = "This client-only script has no server-side fling handler."
-            })
+-- // Launch Test Dummy (local physics only) \\ --
+local lastDummyLaunch = 0
+
+TrollSection:CreateButton({
+    Name = "Launch Test Dummy",
+    Callback = function()
+        local now = os.clock()
+        if now - lastDummyLaunch < 2 then
+            return
         end
+
+        local character = LocalPlayer.Character
+        local characterRoot = character and character:FindFirstChild("HumanoidRootPart")
+        local dummy = Workspace:FindFirstChild("TestDummy")
+        local dummyRoot = dummy and dummy:FindFirstChild("HumanoidRootPart")
+
+        if not characterRoot then
+            LucidUI:Notify({
+                Title = "Launch Dummy",
+                Message = "Your character is not ready."
+            })
+            return
+        end
+
+        if not dummy or not dummy:IsA("Model") or not dummyRoot or not dummyRoot:IsA("BasePart") then
+            LucidUI:Notify({
+                Title = "Launch Dummy",
+                Message = "Add a model named TestDummy with a HumanoidRootPart."
+            })
+            return
+        end
+
+        if (dummyRoot.Position - characterRoot.Position).Magnitude > 18 then
+            LucidUI:Notify({
+                Title = "Launch Dummy",
+                Message = "Move closer to TestDummy."
+            })
+            return
+        end
+
+        lastDummyLaunch = now
+        local launchDirection = (characterRoot.CFrame.LookVector + Vector3.new(0, 1.5, 0)).Unit
+        dummyRoot:ApplyImpulse(launchDirection * dummyRoot.AssemblyMass * 140)
+
+        LucidUI:Notify({
+            Title = "Launch Dummy",
+            Message = "Launch impulse sent. Server-owned dummy physics may not replicate from this client."
+        })
     end,
 })
