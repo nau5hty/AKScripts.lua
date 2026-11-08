@@ -34,6 +34,7 @@ panel.Position = UDim2.new(0, 16, 1, -276)
 panel.BackgroundColor3 = Color3.fromRGB(19, 21, 27)
 panel.BorderSizePixel = 0
 panel.Parent = screen
+panel.Visible = false
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
 
 local stroke = Instance.new("UIStroke")
@@ -334,26 +335,29 @@ end
 local function update()
     local snapshot = getMatchSnapshot()
 
-    if not snapshot then
-        status.Text = "WAITING FOR 1V1 HUD"
-        status.BackgroundColor3 = Color3.fromRGB(43, 49, 61)
-        fighterLine.Text = "Fighter: --"
-        timerLine.Text = "Timer: --"
-        hpLine.Text = "HUD HP values: -- / --"
-        heartsLine.Text = "Hearts: --"
-        extraLine.Text = "Other HUD label: --"
+    -- Only show the monitor when the match HUD has all core signals:
+    -- a running mm:ss timer, a fighter name, and both numeric HP readings.
+    -- This avoids showing it for unrelated lobby/event timers.
+    local matchActive = snapshot ~= nil
+        and snapshot.fighter ~= nil
+        and #snapshot.hp >= 2
+
+    if not matchActive then
+        panel.Visible = false
 
         if previous then
-            addEvent("Match HUD disappeared")
+            events = {}
+            history.Text = "Waiting for match data..."
             previous = nil
         end
         return
     end
 
-    status.Text = snapshot.fighter and "MATCH HUD DETECTED" or "TIMER FOUND - HUD PARTIAL"
-    status.BackgroundColor3 = snapshot.fighter and Color3.fromRGB(35, 91, 67) or Color3.fromRGB(111, 83, 40)
+    panel.Visible = true
+    status.Text = "MATCH HUD DETECTED"
+    status.BackgroundColor3 = Color3.fromRGB(35, 91, 67)
 
-    fighterLine.Text = "Fighter: " .. (snapshot.fighter or "not found")
+    fighterLine.Text = "Fighter: " .. snapshot.fighter
     timerLine.Text = "Timer: " .. (snapshot.timer or "--")
     hpLine.Text = "HUD HP values: " .. (snapshot.hp[1] or "--") .. " / " .. (snapshot.hp[2] or "--")
 
@@ -367,9 +371,9 @@ local function update()
     extraLine.Text = "Other HUD label: " .. (snapshot.extra or "--")
 
     if not previous then
-        addEvent("Match detected | " .. (snapshot.fighter or "fighter unknown"))
+        addEvent("Match detected | " .. snapshot.fighter)
     else
-        if snapshot.fighter ~= previous.fighter and snapshot.fighter then
+        if snapshot.fighter ~= previous.fighter then
             addEvent("Fighter: " .. snapshot.fighter)
         end
         if snapshot.hp[1] ~= previous.hp[1] or snapshot.hp[2] ~= previous.hp[2] then
