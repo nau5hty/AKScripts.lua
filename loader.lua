@@ -133,6 +133,15 @@ local npcMonitorElapsed = 0
 local npcCount = 0
 local attackRange = 7
 
+-- Auto Fight only targets NPCs/dummies in this place.
+-- The game's own combat module must expose these methods:
+-- _G.AXScriptsCombat.LightAttack(targetModel)
+-- _G.AXScriptsCombat.UseAvailableSkills(targetModel)
+local autoM1Enabled = false
+local autoSkillsEnabled = false
+local autoFightElapsed = 0
+local autoFightStatus = "Waiting for game combat integration"
+
 local function CountPracticeDummies()
     local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -146,19 +155,81 @@ local function CountPracticeDummies()
     return count
 end
 
+local function GetNearestPracticeDummy()
+    local character = LocalPlayer.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return nil
+    end
+
+    local nearest, nearestDistance = nil, attackRange
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then
+            local humanoid = obj:FindFirstChildOfClass("Humanoid")
+            local targetRoot = obj:FindFirstChild("HumanoidRootPart")
+            if humanoid and humanoid.Health > 0 and targetRoot then
+                local distance = (targetRoot.Position - root.Position).Magnitude
+                if distance <= nearestDistance then
+                    nearest = obj
+                    nearestDistance = distance
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function RunAutoFight()
+    if not autoM1Enabled and not autoSkillsEnabled then
+        return
+    end
+
+    local combat = _G.AXScriptsCombat
+    if type(combat) ~= "table" then
+        autoFightStatus = "Waiting for _G.AXScriptsCombat"
+        return
+    end
+
+    local target = GetNearestPracticeDummy()
+    if not target then
+        autoFightStatus = "No practice NPC in range"
+        return
+    end
+
+    local didWork = false
+    if autoM1Enabled and type(combat.LightAttack) == "function" then
+        local ok = pcall(combat.LightAttack, target)
+        didWork = didWork or ok
+    end
+    if autoSkillsEnabled and type(combat.UseAvailableSkills) == "function" then
+        local ok = pcall(combat.UseAvailableSkills, target)
+        didWork = didWork or ok
+    end
+
+    if didWork then
+        autoFightStatus = "Running on NPC: " .. target.Name
+    else
+        autoFightStatus = "Combat methods missing or failed"
+    end
+end
+
 local monitorConnection = RunService.Heartbeat:Connect(function(deltaTime)
-    if not npcMonitorEnabled then
-        return
+    if npcMonitorEnabled then
+        npcMonitorElapsed += deltaTime
+        if npcMonitorElapsed >= 1 then
+            npcMonitorElapsed = 0
+            npcCount = CountPracticeDummies()
+            SetDiagnostic("NPC monitor active | practice dummies found: " .. npcCount)
+        end
     end
 
-    npcMonitorElapsed += deltaTime
-    if npcMonitorElapsed < 1 then
-        return
+    if autoM1Enabled or autoSkillsEnabled then
+        autoFightElapsed += deltaTime
+        if autoFightElapsed >= 0.2 then
+            autoFightElapsed = 0
+            RunAutoFight()
+        end
     end
-
-    npcMonitorElapsed = 0
-    npcCount = CountPracticeDummies()
-    SetDiagnostic("NPC monitor active | practice dummies found: " .. npcCount)
 end)
 
 local buildOk, buildError = xpcall(function()
@@ -209,8 +280,46 @@ local buildOk, buildError = xpcall(function()
         end,
     })
 
-    -- Farm tab: safe NPC/dummy monitoring only.
+    -- Farm tab: NPC/dummy practice and Auto Fight integration.
     local FarmTab = Window:CreateTab({Name = "Farm", Icon = "sprout"})
+    local AutoFightSection = FarmTab:CreateSection({Name = "Auto Fight (NPC Only)"})
+
+    AutoFightSection:CreateToggle({
+        Name = "Auto M1",
+        Default = false,
+        Callback = function(state)
+            autoM1Enabled = state
+            autoFightStatus = state and "Auto M1 enabled; checking combat integration" or "Auto M1 disabled"
+            LucidUI:Notify({
+                Title = "Auto Fight",
+                Message = state and "Auto M1 enabled for NPC practice targets." or "Auto M1 disabled."
+            })
+        end,
+    })
+
+    AutoFightSection:CreateToggle({
+        Name = "Auto Skills",
+        Default = false,
+        Callback = function(state)
+            autoSkillsEnabled = state
+            autoFightStatus = state and "Auto Skills enabled; checking combat integration" or "Auto Skills disabled"
+            LucidUI:Notify({
+                Title = "Auto Fight",
+                Message = state and "Auto Skills enabled for NPC practice targets." or "Auto Skills disabled."
+            })
+        end,
+    })
+
+    AutoFightSection:CreateButton({
+        Name = "Auto Fight Status",
+        Callback = function()
+            LucidUI:Notify({
+                Title = "Auto Fight Status",
+                Message = autoFightStatus
+            })
+        end,
+    })
+
     local FarmSection = FarmTab:CreateSection({Name = "NPC Practice Monitor"})
 
     FarmSection:CreateToggle({
