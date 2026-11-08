@@ -139,6 +139,9 @@ local attackRange = 7
 -- _G.AXScriptsCombat.UseAvailableSkills(targetModel)
 local autoM1Enabled = false
 local autoSkillsEnabled = false
+-- These two are configuration placeholders; no block/counter actions are connected.
+local smartBlockEnabled = false
+local autoCounterEnabled = false
 local autoFightElapsed = 0
 local autoFightStatus = "Waiting for game combat integration"
 
@@ -310,6 +313,30 @@ local buildOk, buildError = xpcall(function()
         end,
     })
 
+    AutoFightSection:CreateToggle({
+        Name = "Smart Block (configuration only)",
+        Default = false,
+        Callback = function(state)
+            smartBlockEnabled = state
+            LucidUI:Notify({
+                Title = "Auto Fight",
+                Message = state and "Smart Block setting enabled (not connected)." or "Smart Block setting disabled."
+            })
+        end,
+    })
+
+    AutoFightSection:CreateToggle({
+        Name = "Auto Counter (configuration only)",
+        Default = false,
+        Callback = function(state)
+            autoCounterEnabled = state
+            LucidUI:Notify({
+                Title = "Auto Fight",
+                Message = state and "Auto Counter setting enabled (not connected)." or "Auto Counter setting disabled."
+            })
+        end,
+    })
+
     AutoFightSection:CreateButton({
         Name = "Auto Fight Status",
         Callback = function()
@@ -344,10 +371,10 @@ local buildOk, buildError = xpcall(function()
     })
 
     FarmSection:CreateSlider({
-        Name = "Practice Range Display",
-        Min = 3,
-        Max = 15,
-        Default = 7,
+        Name = "Practice Range",
+        Min = 5,
+        Max = 30,
+        Default = 10,
         Callback = function(value)
             attackRange = value
         end,
