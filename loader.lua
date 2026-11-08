@@ -70,11 +70,11 @@ local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
 local isMobile = UserInputService.TouchEnabled
 
 local windowWidth = isMobile
-    and math.floor(math.clamp(viewport.X * 0.88, 300, 380))
-    or 620
+    and math.floor(math.clamp(viewport.X * 0.92, 320, 420))
+    or 680
 local windowHeight = isMobile
-    and math.floor(math.clamp(viewport.Y * 0.72, 320, 460))
-    or 460
+    and math.floor(math.clamp(viewport.Y * 0.78, 350, 500))
+    or 500
 
 local windowOk, Window = pcall(function()
     local window = LucidUI:CreateWindow({
@@ -174,6 +174,7 @@ local detectorStatusLabel = nil
 local detectorStatsLabel = nil
 local detectorLogLabel = nil
 local detectorStartButton = nil
+local detectorDragConnections = {}
 local RefreshAnimationDetectorPanel = function() end
 
 local function IsPracticeNPC(model)
@@ -410,6 +411,55 @@ local function CreateAnimationDetectorPanel()
         13
     )
     title.Font = Enum.Font.GothamBold
+    title.Active = true
+
+    -- Drag the secondary tester panel by its title area (mouse or touch).
+    local dragging = false
+    local dragInput = nil
+    local dragStart = nil
+    local panelStart = nil
+
+    table.insert(detectorDragConnections, title.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragInput = input.UserInputType == Enum.UserInputType.Touch and input or nil
+            dragStart = input.Position
+            panelStart = detectorPanel.AbsolutePosition
+        end
+    end))
+
+    table.insert(detectorDragConnections, UserInputService.InputChanged:Connect(function(input)
+        if not dragging then
+            return
+        end
+
+        local isDragMovement = input.UserInputType == Enum.UserInputType.MouseMovement
+            or (dragInput ~= nil and input == dragInput)
+
+        if not isDragMovement then
+            return
+        end
+
+        local delta = input.Position - dragStart
+        local currentCamera = Workspace.CurrentCamera
+        local currentViewport = currentCamera and currentCamera.ViewportSize or viewport
+        local maxX = math.max(0, currentViewport.X - detectorPanel.AbsoluteSize.X)
+        local maxY = math.max(0, currentViewport.Y - detectorPanel.AbsoluteSize.Y)
+
+        detectorPanel.Position = UDim2.fromOffset(
+            math.clamp(panelStart.X + delta.X, 0, maxX),
+            math.clamp(panelStart.Y + delta.Y, 0, maxY)
+        )
+    end))
+
+    table.insert(detectorDragConnections, UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+            dragInput = nil
+        end
+    end))
 
     local closeButton = CreateDetectorPanelButton(
         detectorPanel,
@@ -865,6 +915,10 @@ _G.AKScriptsLoaded = function()
         monitorConnection = nil
     end
     StopAnimationDetector()
+    for _, connection in ipairs(detectorDragConnections) do
+        connection:Disconnect()
+    end
+    table.clear(detectorDragConnections)
     if previousCleanup then
         pcall(previousCleanup)
     end
