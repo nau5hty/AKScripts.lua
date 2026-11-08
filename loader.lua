@@ -181,6 +181,15 @@ local hudMonitorParagraph = nil
 local hudMonitorPrevious = nil
 local hudMonitorHistory = {}
 
+-- Read-only live combat observations from visible HUD text and local Humanoid health.
+local combatTestParagraph = nil
+local combatTestPlayerHealth = nil
+local combatTestLastGuardText = nil
+local combatTestLastHudHP1 = nil
+local combatTestLastHudHP2 = nil
+local combatTestTextState = setmetatable({}, {__mode = "k"})
+local combatTestHistory = {}
+
 local function IsOpponentCharacter(player, character)
     if player == nil
         or player == LocalPlayer
@@ -1376,6 +1385,166 @@ end
 
 
 
+local function CombatTestAddEvent(message)
+    local entry = "[" .. os.date("%H:%M:%S") .. "] " .. tostring(message)
+    if combatTestHistory[1] == entry then
+        return
+    end
+    table.insert(combatTestHistory, 1, entry)
+    while #combatTestHistory > 5 do
+        table.remove(combatTestHistory)
+    end
+end
+
+local function CombatTestRefresh()
+    if not combatTestParagraph then
+        return
+    end
+
+    local snapshot = HUDGetSnapshot()
+    local matchActive = snapshot ~= nil
+        and snapshot.fighter ~= nil
+        and #snapshot.hp >= 2
+
+    -- Observe changes in visible combat-related GUI text only.
+    for _, object in ipairs(PlayerGui:GetDescendants()) do
+        if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+            and HUDIsVisible(object) then
+            local currentText = HUDCleanText(object.Text)
+            local previousText = combatTestTextState[object]
+            local objectName = string.lower(tostring(object.Name or ""))
+            local combined = string.lower(objectName .. " " .. currentText)
+            local relevant =
+                string.find(combined, "attack", 1, true)
+                or string.find(combined, "block", 1, true)
+                or string.find(combined, "guard", 1, true)
+                or string.find(combined, "hit", 1, true)
+                or string.find(combined, "counter", 1, true)
+                or string.find(combined, "parry", 1, true)
+                or string.find(combined, "dodge", 1, true)
+                or string.find(combined, "cooldown", 1, true)
+                or string.find(combined, "windup", 1, true)
+                or string.find(combined, "wind up", 1, true)
+                or string.find(combined, "break", 1, true)
+                or string.find(combined, "combo", 1, true)
+                or string.find(combined, "damage", 1, true)
+                or string.find(combined, "m1", 1, true)
+
+            if previousText ~= nil and previousText ~= currentText and relevant then
+                CombatTestAddEvent("VISIBLE HUD CHANGE | " .. tostring(object.Name)
+                    .. ": " .. (currentText ~= "" and currentText or "<blank>"))
+            end
+            combatTestTextState[object] = currentText
+        end
+    end
+
+    -- Local Humanoid health is a direct, read-only indicator of damage received.
+    local localHumanoid = LocalPlayer.Character
+        and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local localHealthText = "unavailable"
+    if localHumanoid then
+        local currentHealth = localHumanoid.Health
+        localHealthText = string.format(
+            "%d / %d",
+            math.floor(currentHealth + 0.5),
+            math.floor(localHumanoid.MaxHealth + 0.5)
+        )
+        if combatTestPlayerHealth ~= nil and currentHealth < combatTestPlayerHealth - 0.05 then
+            CombatTestAddEvent(string.format(
+                "LOCAL DAMAGE | Humanoid HP %.1f -> %.1f (-%.1f)",
+                combatTestPlayerHealth,
+                currentHealth,
+                combatTestPlayerHealth - currentHealth
+            ))
+        end
+        combatTestPlayerHealth = currentHealth
+    else
+        combatTestPlayerHealth = nil
+    end
+
+    -- Only accept visible text explicitly identifying a guard/block meter.
+    local guardText = nil
+    for _, object in ipairs(PlayerGui:GetDescendants()) do
+        if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+            and HUDIsVisible(object) then
+            local objectName = string.lower(tostring(object.Name or "")):gsub("[^%w]", "")
+            local value = HUDCleanText(object.Text)
+            local lowerValue = string.lower(value)
+            local namedMeter =
+                string.find(objectName, "blockhp", 1, true)
+                or string.find(objectName, "blockhealth", 1, true)
+                or string.find(objectName, "guardhp", 1, true)
+                or string.find(objectName, "guardhealth", 1, true)
+                or string.find(objectName, "posture", 1, true)
+            local labelledMeter =
+                string.find(lowerValue, "block hp", 1, true)
+                or string.find(lowerValue, "block health", 1, true)
+                or string.find(lowerValue, "guard hp", 1, true)
+                or string.find(lowerValue, "guard health", 1, true)
+                or string.find(lowerValue, "posture", 1, true)
+            if value ~= "" and (namedMeter or labelledMeter) then
+                guardText = value
+                break
+            end
+        end
+    end
+
+    if guardText and combatTestLastGuardText and guardText ~= combatTestLastGuardText then
+        CombatTestAddEvent("GUARD/BLOCK HUD CHANGE | "
+            .. combatTestLastGuardText .. " -> " .. guardText)
+    end
+    combatTestLastGuardText = guardText
+
+    -- Preserve the existing two HUD values as slots until their sides are confirmed.
+    local hudHPText = "not available"
+    if matchActive then
+        hudHPText = tostring(snapshot.hp[1] or "nil") .. " / "
+            .. tostring(snapshot.hp[2] or "nil")
+        local hp1 = tonumber(snapshot.hp[1])
+        local hp2 = tonumber(snapshot.hp[2])
+
+        if hp1 and combatTestLastHudHP1 and hp1 < combatTestLastHudHP1 then
+            CombatTestAddEvent(string.format(
+                "HUD HP SLOT 1 DECREASED | %.0f -> %.0f",
+                combatTestLastHudHP1,
+                hp1
+            ))
+        end
+        if hp2 and combatTestLastHudHP2 and hp2 < combatTestLastHudHP2 then
+            CombatTestAddEvent(string.format(
+                "HUD HP SLOT 2 DECREASED | %.0f -> %.0f",
+                combatTestLastHudHP2,
+                hp2
+            ))
+        end
+        combatTestLastHudHP1 = hp1
+        combatTestLastHudHP2 = hp2
+    else
+        combatTestLastHudHP1 = nil
+        combatTestLastHudHP2 = nil
+    end
+
+    local lines = {
+        "STATUS: " .. (matchActive and "MATCH HUD FOUND" or "WAITING FOR MATCH HUD"),
+        "Local Humanoid HP: " .. localHealthText,
+        "Visible match HP slots: " .. hudHPText,
+        "Visible block/guard HUD: " .. (guardText or "not found"),
+        "",
+        "OBSERVED VISIBLE COMBAT CHANGES"
+    }
+    if #combatTestHistory == 0 then
+        table.insert(lines, "No matching HUD changes or local damage observed yet.")
+    else
+        for _, eventText in ipairs(combatTestHistory) do
+            table.insert(lines, eventText)
+        end
+    end
+    table.insert(lines, "")
+    table.insert(lines, "Read-only: observations do not prove a successful block.")
+    combatTestParagraph:Set(table.concat(lines, "\n"))
+end
+
+
 local function CountPracticeDummies()
     local count = 0
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -1460,6 +1629,16 @@ local monitorConnection = RunService.Heartbeat:Connect(function(deltaTime)
                     )
                 end
                 warn("[AXScripts HUD Monitor] " .. tostring(err))
+            end
+
+            local combatOk, combatErr = pcall(CombatTestRefresh)
+            if not combatOk then
+                if combatTestParagraph then
+                    combatTestParagraph:Set(
+                        "STATUS: COMBAT TEST MONITOR ERROR\\n" .. tostring(combatErr)
+                    )
+                end
+                warn("[AXScripts Combat Test Monitor] " .. tostring(combatErr))
             end
         end
     end
@@ -1557,6 +1736,15 @@ local buildOk, buildError = xpcall(function()
     })
     hudMonitorEnabled = true
     HUDRefresh()
+
+    local CombatTestSection = FarmTab:CreateSection({Name = "Live Combat Test Monitor (Read Only)"})
+    combatTestParagraph = CombatTestSection:CreateParagraph({
+        Text = "STATUS: WAITING FOR MATCH HUD\nLocal Humanoid HP: unavailable\nVisible match HP slots: not available\nVisible block/guard HUD: not found\n\nOBSERVED VISIBLE COMBAT CHANGES\nNo matching HUD changes or local damage observed yet.\n\nRead-only: observations do not prove a successful block.",
+        TextSize = 10,
+        PaddingX = 6,
+        PaddingY = 6
+    })
+    CombatTestRefresh()
 
     local TrollTab = Window:CreateTab({Name = "Troll", Icon = "laugh"})
     local TrollSection = TrollTab:CreateSection({Name = "Utilities"})
