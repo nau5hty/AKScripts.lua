@@ -169,6 +169,12 @@ local animationEvents = {}
 local animationClassesById = {}
 local lastAnimationEvent = nil
 local animationDetectionStartedAt = 0
+local detectorPanel = nil
+local detectorStatusLabel = nil
+local detectorStatsLabel = nil
+local detectorLogLabel = nil
+local detectorStartButton = nil
+local RefreshAnimationDetectorPanel = function() end
 
 local function IsPracticeNPC(model)
     return typeof(model) == "Instance"
@@ -207,6 +213,7 @@ local function RecordPracticeAnimation(model, track)
         eventRecord.Priority,
         eventRecord.Length
     ))
+    RefreshAnimationDetectorPanel()
 end
 
 local function AttachPracticeAnimator(model, animator)
@@ -262,6 +269,7 @@ local function StopAnimationDetector()
         animationTagAddedConnection:Disconnect()
         animationTagAddedConnection = nil
     end
+    RefreshAnimationDetectorPanel()
 end
 
 local function StartAnimationDetector()
@@ -285,6 +293,7 @@ local function StartAnimationDetector()
         end
     end)
 
+    RefreshAnimationDetectorPanel()
     return true, "Watching tagged practice NPCs."
 end
 
@@ -306,6 +315,7 @@ local function ClassifyLastAnimation(classification)
     end
 
     lastAnimationEvent.Classification = classification
+    RefreshAnimationDetectorPanel()
     return true, "Saved " .. classification .. " label for " .. animationId
 end
 
@@ -331,6 +341,226 @@ local function GetAnimationDetectorStatus()
         tostring(lastId)
     )
 end
+
+local function CreateDetectorPanelButton(parent, name, caption, position, size, color)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Text = caption
+    button.Position = position
+    button.Size = size
+    button.BackgroundColor3 = color or Color3.fromRGB(42, 42, 52)
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamBold
+    button.TextColor3 = Color3.fromRGB(240, 240, 245)
+    button.TextSize = 11
+    button.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+    return button
+end
+
+local function CreateDetectorPanelLabel(parent, name, caption, position, size, textSize)
+    local label = Instance.new("TextLabel")
+    label.Name = name
+    label.Text = caption
+    label.Position = position
+    label.Size = size
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.Gotham
+    label.TextColor3 = Color3.fromRGB(225, 225, 235)
+    label.TextSize = textSize or 11
+    label.TextWrapped = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.Parent = parent
+    return label
+end
+
+local function CreateAnimationDetectorPanel()
+    if detectorPanel or not ProtectedGui then
+        return
+    end
+
+    detectorPanel = Instance.new("Frame")
+    detectorPanel.Name = "AnimationDetectorPanel"
+    detectorPanel.Size = UDim2.fromOffset(350, 285)
+    detectorPanel.Position = UDim2.new(0, 14, 1, -300)
+    detectorPanel.BackgroundColor3 = Color3.fromRGB(17, 17, 22)
+    detectorPanel.BorderSizePixel = 0
+    detectorPanel.Visible = false
+    detectorPanel.Parent = ProtectedGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = detectorPanel
+
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.fromRGB(75, 75, 88)
+    outline.Thickness = 1
+    outline.Parent = detectorPanel
+
+    local title = CreateDetectorPanelLabel(
+        detectorPanel,
+        "Title",
+        "AXScripts  /  Attack Animation Tester",
+        UDim2.fromOffset(12, 7),
+        UDim2.new(1, -48, 0, 24),
+        13
+    )
+    title.Font = Enum.Font.GothamBold
+
+    local closeButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "Close",
+        "X",
+        UDim2.new(1, -34, 0, 7),
+        UDim2.fromOffset(24, 24),
+        Color3.fromRGB(80, 40, 44)
+    )
+    closeButton.MouseButton1Click:Connect(function()
+        detectorPanel.Visible = false
+    end)
+
+    detectorStatusLabel = CreateDetectorPanelLabel(
+        detectorPanel,
+        "Status",
+        "Status: stopped",
+        UDim2.fromOffset(12, 34),
+        UDim2.new(1, -24, 0, 30),
+        10
+    )
+    detectorStatusLabel.TextColor3 = Color3.fromRGB(165, 200, 255)
+
+    detectorStartButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "StartStop",
+        "START DETECTOR",
+        UDim2.fromOffset(12, 70),
+        UDim2.new(1, -24, 0, 30),
+        Color3.fromRGB(42, 65, 90)
+    )
+    detectorStartButton.MouseButton1Click:Connect(function()
+        if animationDetectionEnabled then
+            StopAnimationDetector()
+        else
+            local started, message = StartAnimationDetector()
+            if not started then
+                LucidUI:Notify({
+                    Title = "Animation Detector",
+                    Message = message
+                })
+            end
+        end
+        RefreshAnimationDetectorPanel()
+    end)
+
+    local attackButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "MarkAttack",
+        "MARK LAST: ATTACK",
+        UDim2.fromOffset(12, 107),
+        UDim2.new(0.5, -18, 0, 28),
+        Color3.fromRGB(35, 75, 58)
+    )
+    attackButton.MouseButton1Click:Connect(function()
+        local ok, message = ClassifyLastAnimation("ATTACK")
+        detectorStatusLabel.Text = message
+        RefreshAnimationDetectorPanel()
+    end)
+
+    local otherButton = CreateDetectorPanelButton(
+        detectorPanel,
+        "MarkOther",
+        "MARK LAST: OTHER",
+        UDim2.new(0.5, 6, 0, 107),
+        UDim2.new(0.5, -18, 0, 28),
+        Color3.fromRGB(82, 58, 43)
+    )
+    otherButton.MouseButton1Click:Connect(function()
+        local ok, message = ClassifyLastAnimation("OTHER")
+        detectorStatusLabel.Text = message
+        RefreshAnimationDetectorPanel()
+    end)
+
+    detectorStatsLabel = CreateDetectorPanelLabel(
+        detectorPanel,
+        "Stats",
+        "Observed: 0 | Attack: 0 | Other: 0 | Unreviewed: 0",
+        UDim2.fromOffset(12, 140),
+        UDim2.new(1, -24, 0, 27),
+        9
+    )
+
+    detectorLogLabel = CreateDetectorPanelLabel(
+        detectorPanel,
+        "RecentEvents",
+        "No events yet. Tag a practice dummy with AXPracticeNPC.",
+        UDim2.fromOffset(12, 170),
+        UDim2.new(1, -24, 1, -180),
+        9
+    )
+    detectorLogLabel.Font = Enum.Font.Code
+    detectorLogLabel.TextYAlignment = Enum.TextYAlignment.Top
+
+    RefreshAnimationDetectorPanel()
+end
+
+RefreshAnimationDetectorPanel = function()
+    if not detectorPanel then
+        return
+    end
+
+    if not RunService:IsStudio() then
+        detectorStatusLabel.Text = "Studio-only: open a place you control in Roblox Studio."
+    elseif animationDetectionEnabled then
+        detectorStatusLabel.Text = "Watching tagged practice NPCs..."
+    else
+        detectorStatusLabel.Text = "Stopped | Tag a dummy with AXPracticeNPC."
+    end
+
+    if animationDetectionEnabled then
+        detectorStartButton.Text = "STOP DETECTOR"
+    else
+        detectorStartButton.Text = "START DETECTOR"
+    end
+
+    local attacks, others, unreviewed = 0, 0, 0
+    local visible = {}
+    local first = math.max(1, #animationEvents - 7)
+    for index, eventRecord in ipairs(animationEvents) do
+        if eventRecord.Classification == "ATTACK" then
+            attacks += 1
+        elseif eventRecord.Classification == "OTHER" then
+            others += 1
+        else
+            unreviewed += 1
+        end
+        if index >= first then
+            table.insert(visible, string.format(
+                "%s | %s | %s | +%.0fms",
+                eventRecord.Classification,
+                eventRecord.Model,
+                tostring(eventRecord.AnimationId),
+                eventRecord.Elapsed * 1000
+            ))
+        end
+    end
+
+    detectorStatsLabel.Text = string.format(
+        "Observed: %d | Attack: %d | Other: %d | Unreviewed: %d",
+        #animationEvents,
+        attacks,
+        others,
+        unreviewed
+    )
+    detectorLogLabel.Text = #visible > 0
+        and table.concat(visible, "\n")
+        or "No events yet. Tag a dummy with AXPracticeNPC."
+end
+
+CreateAnimationDetectorPanel()
 
 local function CountPracticeDummies()
     local count = 0
@@ -557,54 +787,15 @@ local buildOk, buildError = xpcall(function()
         end,
     })
 
-    local DetectorSection = FarmTab:CreateSection({Name = "Attack Animation Tester (Studio NPCs)"})
+    local DetectorSection = FarmTab:CreateSection({Name = "Attack Animation Tester"})
 
-    DetectorSection:CreateToggle({
-        Name = "Watch Tagged Practice NPCs",
-        Default = false,
-        Callback = function(state)
-            if state then
-                local started, message = StartAnimationDetector()
-                if not started then
-                    LucidUI:Notify({
-                        Title = "Animation Detector",
-                        Message = message
-                    })
-                    return
-                end
-                LucidUI:Notify({
-                    Title = "Animation Detector",
-                    Message = message .. " Tag dummy Models with AXPracticeNPC."
-                })
-            else
-                StopAnimationDetector()
-                LucidUI:Notify({
-                    Title = "Animation Detector",
-                    Message = "Detector stopped."
-                })
+    DetectorSection:CreateButton({
+        Name = "Open Animation Tester Panel",
+        Callback = function()
+            if detectorPanel then
+                detectorPanel.Visible = true
+                RefreshAnimationDetectorPanel()
             end
-        end,
-    })
-
-    DetectorSection:CreateButton({
-        Name = "Mark Last Animation: ATTACK",
-        Callback = function()
-            local ok, message = ClassifyLastAnimation("ATTACK")
-            LucidUI:Notify({
-                Title = "Animation Label",
-                Message = message
-            })
-        end,
-    })
-
-    DetectorSection:CreateButton({
-        Name = "Mark Last Animation: OTHER",
-        Callback = function()
-            local ok, message = ClassifyLastAnimation("OTHER")
-            LucidUI:Notify({
-                Title = "Animation Label",
-                Message = message
-            })
         end,
     })
 
