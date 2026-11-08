@@ -16,31 +16,12 @@ end
 
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local DiagnosticGui = Instance.new("ScreenGui")
-DiagnosticGui.Name = "AXScripts_Diagnostics"
-DiagnosticGui.ResetOnSpawn = false
-DiagnosticGui.Parent = PlayerGui
-
-local DiagnosticLabel = Instance.new("TextLabel")
-DiagnosticLabel.Size = UDim2.fromOffset(300, 54)
-DiagnosticLabel.Position = UDim2.new(0.5, -150, 0, 16)
-DiagnosticLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-DiagnosticLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-DiagnosticLabel.TextWrapped = true
-DiagnosticLabel.TextSize = 14
-DiagnosticLabel.Font = Enum.Font.GothamBold
-DiagnosticLabel.Text = "AXScripts: starting..."
-DiagnosticLabel.Parent = DiagnosticGui
-
+-- Startup diagnostics are written to the console only; no temporary popup.
 local function SetDiagnostic(message)
-    DiagnosticLabel.Text = "AXScripts: " .. tostring(message)
     warn("[AXScripts] " .. tostring(message))
 end
 
 local function Cleanup()
-    if DiagnosticGui then
-        DiagnosticGui:Destroy()
-    end
     local oldGui = PlayerGui:FindFirstChild("AKScripts_ProtectedContainer")
     if oldGui then
         oldGui:Destroy()
@@ -1547,125 +1528,23 @@ local buildOk, buildError = xpcall(function()
 
     -- Farm tab: NPC/dummy practice and Auto Fight integration.
     local FarmTab = Window:CreateTab({Name = "Farm", Icon = "sprout"})
-    local AutoFightSection = FarmTab:CreateSection({Name = "Auto Fight (NPC Only)"})
 
-    AutoFightSection:CreateToggle({
-        Name = "Auto M1",
-        Default = false,
-        Callback = function(state)
-            autoM1Enabled = state
-            autoFightStatus = state and "Auto M1 enabled; checking combat integration" or "Auto M1 disabled"
-            LucidUI:Notify({
-                Title = "Auto Fight",
-                Message = state and "Auto M1 enabled for NPC practice targets." or "Auto M1 disabled."
-            })
-        end,
-    })
-
-    AutoFightSection:CreateToggle({
-        Name = "Auto Skills",
-        Default = false,
-        Callback = function(state)
-            autoSkillsEnabled = state
-            autoFightStatus = state and "Auto Skills enabled; checking combat integration" or "Auto Skills disabled"
-            LucidUI:Notify({
-                Title = "Auto Fight",
-                Message = state and "Auto Skills enabled for NPC practice targets." or "Auto Skills disabled."
-            })
-        end,
-    })
-
-    AutoFightSection:CreateToggle({
+    local AutoBlockSection = FarmTab:CreateSection({Name = "Auto Block"})
+    AutoBlockSection:CreateToggle({
         Name = "Auto Block (practice only - not connected)",
         Default = false,
         Callback = function(state)
             smartBlockEnabled = state
             LucidUI:Notify({
-                Title = "Auto Fight",
-                Message = state and "Practice-only setting saved. No blocking action is connected; an official practice-NPC adapter is required." or "Auto Block setting disabled."
-            })
-        end,
-    })
-
-    AutoFightSection:CreateToggle({
-        Name = "Auto Counter (configuration only)",
-        Default = false,
-        Callback = function(state)
-            autoCounterEnabled = state
-            LucidUI:Notify({
-                Title = "Auto Fight",
-                Message = state and "Auto Counter setting enabled (not connected)." or "Auto Counter setting disabled."
-            })
-        end,
-    })
-
-    AutoFightSection:CreateButton({
-        Name = "Auto Fight Status",
-        Callback = function()
-            LucidUI:Notify({
-                Title = "Auto Fight Status",
-                Message = autoFightStatus
-            })
-        end,
-    })
-
-    local FarmSection = FarmTab:CreateSection({Name = "NPC Practice Monitor"})
-
-    FarmSection:CreateToggle({
-        Name = "Monitor NPCs / Dummies",
-        Default = false,
-        Callback = function(state)
-            npcMonitorEnabled = state
-            npcMonitorElapsed = 1
-            if state then
-                LucidUI:Notify({
-                    Title = "NPC Monitor",
-                    Message = "Monitoring NPCs and training dummies in this place."
-                })
-            else
-                SetDiagnostic("NPC monitor stopped")
-                LucidUI:Notify({
-                    Title = "NPC Monitor",
-                    Message = "Monitoring disabled."
-                })
-            end
-        end,
-    })
-
-    local DetectorSection = FarmTab:CreateSection({Name = "Opponent Animation Monitor"})
-
-    DetectorSection:CreateSlider({
-        Name = "Nearby Player Range",
-        Min = 40,
-        Max = 300,
-        Default = 120,
-        Callback = function(value)
-            animationPlayerRange = value
-        end,
-    })
-
-    DetectorSection:CreateButton({
-        Name = "Open Opponent Animation Panel",
-        Callback = function()
-            if detectorPanel then
-                detectorPanel.Visible = true
-                RefreshAnimationDetectorPanel()
-            end
-        end,
-    })
-
-    DetectorSection:CreateButton({
-        Name = "Opponent Animation Status",
-        Callback = function()
-            LucidUI:Notify({
-                Title = "Animation Detector",
-                Message = GetAnimationDetectorStatus()
+                Title = "Auto Block",
+                Message = state
+                    and "Practice-only setting saved. No blocking action is connected; an official practice-NPC adapter is required."
+                    or "Auto Block setting disabled."
             })
         end,
     })
 
     local HUDMonitorSection = FarmTab:CreateSection({Name = "Opponent HUD Monitor (Read Only)"})
-
     hudMonitorParagraph = HUDMonitorSection:CreateParagraph({
         Text = "STATUS: LOBBY | VALUES NIL\nFighter: nil\nTimer: nil\nHP: nil / nil\nHearts: nil\nOther HUD label: nil\n\nRECENT HUD CHANGES\nNo recent changes.",
         TextSize = 11,
@@ -1675,29 +1554,6 @@ local buildOk, buildError = xpcall(function()
     hudMonitorEnabled = true
     HUDRefresh()
 
-
-    FarmSection:CreateSlider({
-        Name = "Practice Range",
-        Min = 5,
-        Max = 30,
-        Default = 10,
-        Callback = function(value)
-            attackRange = value
-        end,
-    })
-
-    FarmSection:CreateButton({
-        Name = "Count NPCs / Dummies",
-        Callback = function()
-            npcCount = CountPracticeDummies()
-            LucidUI:Notify({
-                Title = "Practice Dummies",
-                Message = tostring(npcCount) .. " NPC/dummy model(s) found."
-            })
-        end,
-    })
-
-    -- Keep the original tab in the layout without player-targeting actions.
     local TrollTab = Window:CreateTab({Name = "Troll", Icon = "laugh"})
     local TrollSection = TrollTab:CreateSection({Name = "Utilities"})
     TrollSection:CreateButton({
@@ -1717,12 +1573,6 @@ if not buildOk then
 end
 
 SetDiagnostic("UI loaded successfully")
-
-task.delay(8, function()
-    if DiagnosticGui and DiagnosticGui.Parent then
-        DiagnosticGui:Destroy()
-    end
-end)
 
 -- Clean up background work when this loader is replaced.
 local previousCleanup = _G.AKScriptsLoaded
