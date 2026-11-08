@@ -323,9 +323,10 @@ local function IsWorldEventTimerContext(object, playerGui)
         end
 
         -- Event panels commonly place their title and countdown as siblings.
-        if current.Parent then
+        -- Keep sibling checks local to avoid unrelated lobby labels elsewhere on the HUD.
+        if depth <= 1 and current.Parent then
             for _, sibling in ipairs(current.Parent:GetChildren()) do
-                if sibling ~= object
+                if sibling ~= current
                     and (sibling:IsA("TextLabel") or sibling:IsA("TextButton") or sibling:IsA("TextBox"))
                     and containsBlockedWord(sibling.Text) then
                     return true
