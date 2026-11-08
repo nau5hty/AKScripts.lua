@@ -335,54 +335,63 @@ end
 local function update()
     local snapshot = getMatchSnapshot()
 
-    -- Only show the monitor when the match HUD has all core signals:
-    -- a running mm:ss timer, a fighter name, and both numeric HP readings.
-    -- This avoids showing it for unrelated lobby/event timers.
+    -- Keep the monitor visible, but clear tracked values to nil in the lobby.
+    -- Populate them only when timer, fighter name, and both HP values exist.
     local matchActive = snapshot ~= nil
         and snapshot.fighter ~= nil
         and #snapshot.hp >= 2
 
+    panel.Visible = true
+
     if not matchActive then
-        panel.Visible = false
+        status.Text = "LOBBY | VALUES NIL"
+        status.BackgroundColor3 = Color3.fromRGB(43, 49, 61)
+        fighterLine.Text = "Fighter: nil"
+        timerLine.Text = "Timer: nil"
+        hpLine.Text = "HUD HP values: nil / nil"
+        heartsLine.Text = "Hearts: nil"
+        extraLine.Text = "Other HUD label: nil"
 
         if previous then
-            events = {}
-            history.Text = "Waiting for match data..."
             previous = nil
+            events = {}
+            history.Text = "No active match data."
         end
         return
     end
 
-    panel.Visible = true
     status.Text = "MATCH HUD DETECTED"
     status.BackgroundColor3 = Color3.fromRGB(35, 91, 67)
 
     fighterLine.Text = "Fighter: " .. snapshot.fighter
-    timerLine.Text = "Timer: " .. (snapshot.timer or "--")
-    hpLine.Text = "HUD HP values: " .. (snapshot.hp[1] or "--") .. " / " .. (snapshot.hp[2] or "--")
+    timerLine.Text = "Timer: " .. (snapshot.timer or "nil")
+    hpLine.Text = "HUD HP values: " .. (snapshot.hp[1] or "nil")
+        .. " / " .. (snapshot.hp[2] or "nil")
 
     if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
-        heartsLine.Text = "Hearts (visible HUD): " .. tostring(snapshot.heartsLeft or "--")
-            .. " / " .. tostring(snapshot.heartsRight or "--")
+        heartsLine.Text = "Hearts (visible HUD): " .. tostring(snapshot.heartsLeft or "nil")
+            .. " / " .. tostring(snapshot.heartsRight or "nil")
     else
-        heartsLine.Text = "Hearts: not exposed in this HUD group"
+        heartsLine.Text = "Hearts: nil"
     end
 
-    extraLine.Text = "Other HUD label: " .. (snapshot.extra or "--")
+    extraLine.Text = "Other HUD label: " .. (snapshot.extra or "nil")
 
     if not previous then
+        events = {}
+        history.Text = "Match data detected."
         addEvent("Match detected | " .. snapshot.fighter)
     else
         if snapshot.fighter ~= previous.fighter then
             addEvent("Fighter: " .. snapshot.fighter)
         end
         if snapshot.hp[1] ~= previous.hp[1] or snapshot.hp[2] ~= previous.hp[2] then
-            addEvent("HP: " .. (snapshot.hp[1] or "--") .. " / " .. (snapshot.hp[2] or "--"))
+            addEvent("HP: " .. (snapshot.hp[1] or "nil") .. " / " .. (snapshot.hp[2] or "nil"))
         end
         if snapshot.heartsLeft ~= previous.heartsLeft or snapshot.heartsRight ~= previous.heartsRight then
             if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
-                addEvent("Hearts: " .. tostring(snapshot.heartsLeft or "--")
-                    .. " / " .. tostring(snapshot.heartsRight or "--"))
+                addEvent("Hearts: " .. tostring(snapshot.heartsLeft or "nil")
+                    .. " / " .. tostring(snapshot.heartsRight or "nil"))
             end
         end
     end
