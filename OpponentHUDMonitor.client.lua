@@ -185,6 +185,11 @@ local function screenDistance(a, b)
     return (ap - bp).Magnitude
 end
 
+local function countHearts(raw)
+    local _, count = tostring(raw or ""):gsub("♥", "")
+    return count
+end
+
 local function getMatchSnapshot()
     local timerCandidates = {}
 
