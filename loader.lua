@@ -18,7 +18,11 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- Startup diagnostics are written to the console only; no temporary popup.
 local function SetDiagnostic(message)
-    warn("[AXScripts] " .. tostring(message))
+    local diagnostic = string.lower(tostring(message))
+    if string.find(diagnostic, "failed", 1, true)
+        or string.find(diagnostic, "error", 1, true) then
+        warn("[AXScripts] " .. tostring(message))
+    end
 end
 
 local function Cleanup()
