@@ -197,9 +197,9 @@ local function readOverheadNameLabels()
         return value
     end
 
-    local function getAttachedModel(billboard)
-        local current = billboard.Adornee or billboard.Parent
-        while current and current ~= Workspace do
+    local function getAttachedModel(guiObject)
+        local current = guiObject.Adornee or guiObject.Parent
+        while current and current ~= Workspace and current ~= PlayerGui do
             if current:IsA("Model") then
                 return current
             end
@@ -208,43 +208,49 @@ local function readOverheadNameLabels()
         return nil
     end
 
-    for _, object in ipairs(Workspace:GetDescendants()) do
-        if object:IsA("BillboardGui") and object.Enabled then
-            local model = getAttachedModel(object)
-            if model and model ~= LocalPlayer.Character then
-                local modelRoot = findModelRoot(model)
-                local closeEnough = true
-                if modelRoot and LocalPlayer.Character then
-                    local myRoot = findModelRoot(LocalPlayer.Character)
-                    if myRoot then
-                        closeEnough = (modelRoot.Position - myRoot.Position).Magnitude <= SCAN_RADIUS
+    local containers = {Workspace, PlayerGui}
+    for _, container in ipairs(containers) do
+        for _, object in ipairs(container:GetDescendants()) do
+            if (object:IsA("BillboardGui") or object:IsA("SurfaceGui")) and object.Enabled then
+                local model = getAttachedModel(object)
+                if model and model ~= LocalPlayer.Character then
+                    local modelRoot = findModelRoot and findModelRoot(model)
+                    local closeEnough = true
+
+                    if modelRoot and LocalPlayer.Character and findModelRoot then
+                        local myRoot = findModelRoot(LocalPlayer.Character)
+                        if myRoot then
+                            closeEnough = (modelRoot.Position - myRoot.Position).Magnitude <= SCAN_RADIUS
+                        end
                     end
-                end
 
-                if closeEnough then
-                    local linkedPlayer = Players:GetPlayerFromCharacter(model)
-                    for _, label in ipairs(object:GetDescendants()) do
-                        if label:IsA("TextLabel") or label:IsA("TextButton") or label:IsA("TextBox") then
-                            local value = cleanText(label.Text)
-                            local key = string.lower(value)
-                            if value ~= "" and not seen[model:GetFullName() .. "|" .. label.Name .. "|" .. key] then
-                                seen[model:GetFullName() .. "|" .. label.Name .. "|" .. key] = true
+                    if closeEnough then
+                        local linkedPlayer = Players:GetPlayerFromCharacter(model)
+                        for _, label in ipairs(object:GetDescendants()) do
+                            if label:IsA("TextLabel") or label:IsA("TextButton") or label:IsA("TextBox") then
+                                local value = cleanText(label.Text)
+                                local key = string.lower(value)
+                                local uniqueKey = model:GetFullName() .. "|" .. label.Name .. "|" .. key
 
-                                local status
-                                if linkedPlayer then
-                                    status = "PLAYER MODEL: " .. linkedPlayer.Name
-                                elseif roster[key] then
-                                    status = "LABEL MATCHES SERVER ROSTER"
-                                else
-                                    status = "NOT IN ROSTER - POSSIBLE BOT/TITLE"
+                                if value ~= "" and not seen[uniqueKey] then
+                                    seen[uniqueKey] = true
+
+                                    local status
+                                    if linkedPlayer then
+                                        status = "PLAYER MODEL: " .. linkedPlayer.Name
+                                    elseif roster[key] then
+                                        status = "LABEL MATCHES SERVER ROSTER"
+                                    else
+                                        status = "NOT IN ROSTER - POSSIBLE BOT/TITLE"
+                                    end
+
+                                    table.insert(entries, {
+                                        model = model.Name,
+                                        label = label.Name,
+                                        value = value,
+                                        status = status
+                                    })
                                 end
-
-                                table.insert(entries, {
-                                    model = model.Name,
-                                    label = label.Name,
-                                    value = value,
-                                    status = status
-                                })
                             end
                         end
                     end
@@ -412,6 +418,36 @@ local function refresh()
         end
         if #overheadEntries > 15 then
             table.insert(lines, "  ... plus " .. tostring(#overheadEntries - 15) .. " more labels.")
+        end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "HUMANOID DISPLAY NAME VS SERVER ROSTER:")
+    local rosterNames = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        rosterNames[string.lower(player.Name)] = true
+        rosterNames[string.lower(player.DisplayName)] = true
+    end
+    local charactersForNames, nameScanError = getNearbyCharacters()
+    local checkedNames = 0
+
+    if nameScanError then
+        table.insert(lines, "  " .. nameScanError)
+    else
+        for _, item in ipairs(charactersForNames) do
+            local candidateName = tostring(item.display or "")
+            if candidateName ~= "" then
+                checkedNames = checkedNames + 1
+                local normalizedName = string.lower(candidateName)
+                local status = rosterNames[normalizedName]
+                    and "MATCHES SERVER PLAYER"
+                    or "NOT IN ROSTER - POSSIBLE BOT/OTHER NPC"
+                table.insert(lines, "  " .. item.model .. " | " .. candidateName .. " | " .. status)
+            end
+        end
+
+        if checkedNames == 0 then
+            table.insert(lines, "  No nearby Humanoid display names available.")
         end
     end
 
