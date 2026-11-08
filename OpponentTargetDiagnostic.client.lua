@@ -32,7 +32,7 @@ screenGui.Parent = PlayerGui
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
-panel.Size = UDim2.fromOffset(360, 330)
+panel.Size = UDim2.fromOffset(360, 360)
 panel.Position = UDim2.fromOffset(16, 100)
 panel.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 panel.BorderSizePixel = 0
@@ -61,8 +61,8 @@ titleBar.Parent = panel
 
 local refreshButton = Instance.new("TextButton")
 refreshButton.Name = "Refresh"
-refreshButton.Size = UDim2.fromOffset(88, 28)
-refreshButton.Position = UDim2.new(1, -190, 0, 39)
+refreshButton.Size = UDim2.fromOffset(76, 28)
+refreshButton.Position = UDim2.fromOffset(108, 39)
 refreshButton.BackgroundColor3 = Color3.fromRGB(48, 92, 145)
 refreshButton.Text = "REFRESH"
 refreshButton.TextColor3 = Color3.new(1, 1, 1)
@@ -71,10 +71,45 @@ refreshButton.TextSize = 11
 refreshButton.Parent = panel
 Instance.new("UICorner", refreshButton).CornerRadius = UDim.new(0, 6)
 
+local previousButton = Instance.new("TextButton")
+previousButton.Name = "PreviousPage"
+previousButton.Size = UDim2.fromOffset(42, 28)
+previousButton.Position = UDim2.fromOffset(8, 39)
+previousButton.BackgroundColor3 = Color3.fromRGB(58, 64, 76)
+previousButton.Text = "<"
+previousButton.TextColor3 = Color3.new(1, 1, 1)
+previousButton.Font = Enum.Font.GothamBold
+previousButton.TextSize = 14
+previousButton.Parent = panel
+Instance.new("UICorner", previousButton).CornerRadius = UDim.new(0, 6)
+
+local nextButton = Instance.new("TextButton")
+nextButton.Name = "NextPage"
+nextButton.Size = UDim2.fromOffset(42, 28)
+nextButton.Position = UDim2.fromOffset(54, 39)
+nextButton.BackgroundColor3 = Color3.fromRGB(58, 64, 76)
+nextButton.Text = ">"
+nextButton.TextColor3 = Color3.new(1, 1, 1)
+nextButton.Font = Enum.Font.GothamBold
+nextButton.TextSize = 14
+nextButton.Parent = panel
+Instance.new("UICorner", nextButton).CornerRadius = UDim.new(0, 6)
+
+local pageLabel = Instance.new("TextLabel")
+pageLabel.Name = "PageLabel"
+pageLabel.Size = UDim2.fromOffset(64, 28)
+pageLabel.Position = UDim2.fromOffset(190, 39)
+pageLabel.BackgroundTransparency = 1
+pageLabel.Text = "Page 1/1"
+pageLabel.TextColor3 = Color3.fromRGB(220, 226, 235)
+pageLabel.Font = Enum.Font.Gotham
+pageLabel.TextSize = 10
+pageLabel.Parent = panel
+
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "Close"
-closeButton.Size = UDim2.fromOffset(88, 28)
-closeButton.Position = UDim2.new(1, -96, 0, 39)
+closeButton.Size = UDim2.fromOffset(82, 28)
+closeButton.Position = UDim2.new(1, -90, 0, 39)
 closeButton.BackgroundColor3 = Color3.fromRGB(105, 52, 58)
 closeButton.Text = "CLOSE"
 closeButton.TextColor3 = Color3.new(1, 1, 1)
@@ -83,26 +118,24 @@ closeButton.TextSize = 11
 closeButton.Parent = panel
 Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 6)
 
-local output = Instance.new("ScrollingFrame")
+local output = Instance.new("Frame")
 output.Name = "Output"
 output.Size = UDim2.new(1, -20, 1, -80)
 output.Position = UDim2.fromOffset(10, 74)
 output.BackgroundColor3 = Color3.fromRGB(13, 15, 20)
 output.BorderSizePixel = 0
-output.ScrollBarThickness = 5
-output.AutomaticCanvasSize = Enum.AutomaticSize.Y
-output.CanvasSize = UDim2.new(0, 0, 0, 0)
+output.ClipsDescendants = true
 output.Parent = panel
 Instance.new("UICorner", output).CornerRadius = UDim.new(0, 7)
 
 local outputText = Instance.new("TextLabel")
 outputText.Name = "OutputText"
-outputText.Size = UDim2.new(1, -12, 0, 0)
-outputText.AutomaticSize = Enum.AutomaticSize.Y
+outputText.Position = UDim2.fromOffset(8, 8)
+outputText.Size = UDim2.new(1, -16, 1, -16)
 outputText.BackgroundTransparency = 1
 outputText.TextColor3 = Color3.fromRGB(220, 226, 235)
 outputText.Font = Enum.Font.Code
-outputText.TextSize = 12
+outputText.TextSize = 10
 outputText.TextXAlignment = Enum.TextXAlignment.Left
 outputText.TextYAlignment = Enum.TextYAlignment.Top
 outputText.TextWrapped = true
@@ -110,12 +143,44 @@ outputText.RichText = false
 outputText.Text = "Press REFRESH while a 1v1 match is active."
 outputText.Parent = output
 
-local outputPadding = Instance.new("UIPadding")
-outputPadding.PaddingTop = UDim.new(0, 8)
-outputPadding.PaddingBottom = UDim.new(0, 8)
-outputPadding.PaddingLeft = UDim.new(0, 8)
-outputPadding.PaddingRight = UDim.new(0, 8)
-outputPadding.Parent = outputText
+local allLines = {}
+local currentPage = 1
+local LINES_PER_PAGE = 5
+
+local function renderPage()
+    local totalPages = math.max(1, math.ceil(#allLines / LINES_PER_PAGE))
+    currentPage = math.clamp(currentPage, 1, totalPages)
+
+    local firstLine = (currentPage - 1) * LINES_PER_PAGE + 1
+    local lastLine = math.min(#allLines, firstLine + LINES_PER_PAGE - 1)
+    local pageLines = {}
+
+    for index = firstLine, lastLine do
+        table.insert(pageLines, allLines[index])
+    end
+
+    outputText.Text = #pageLines > 0 and table.concat(pageLines, "\\n")
+        or "No diagnostic data yet."
+
+    pageLabel.Text = string.format("Page %d/%d", currentPage, totalPages)
+    previousButton.TextTransparency = currentPage > 1 and 0 or 0.55
+    nextButton.TextTransparency = currentPage < totalPages and 0 or 0.55
+end
+
+previousButton.Activated:Connect(function()
+    if currentPage > 1 then
+        currentPage = currentPage - 1
+        renderPage()
+    end
+end)
+
+nextButton.Activated:Connect(function()
+    local totalPages = math.max(1, math.ceil(#allLines / LINES_PER_PAGE))
+    if currentPage < totalPages then
+        currentPage = currentPage + 1
+        renderPage()
+    end
+end)
 
 local function isGuiVisible(object)
     local current = object
@@ -484,7 +549,9 @@ local function refresh()
 
     table.insert(lines, "")
     table.insert(lines, "Send the HUD lines and character list back.")
-    outputText.Text = table.concat(lines, "\n")
+    allLines = lines
+    currentPage = 1
+    renderPage()
 end
 
 refreshButton.Activated:Connect(refresh)
