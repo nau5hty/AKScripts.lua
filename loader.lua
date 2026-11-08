@@ -162,6 +162,9 @@ local autoFightStatus = "Waiting for game combat integration"
 -- Read-only monitor for character animations replicated to this client.
 -- Uses documented Animator events/properties only; it does not call combat remotes.
 local animationDetectionEnabled = false
+local matchIsActive = false
+local matchPollConnection = nil
+local matchPollElapsed = 0
 local animationAnimatorConnections = {}
 local animationModelConnections = {}
 local animationPlayerConnections = {}
@@ -188,7 +191,7 @@ local function IsOpponentCharacter(player, character)
 end
 
 local function RecordOpponentAnimation(player, track, source)
-    if not animationDetectionEnabled or not player or player == LocalPlayer then
+    if not animationDetectionEnabled or not matchIsActive or not player or player == LocalPlayer then
         return
     end
 
@@ -226,6 +229,7 @@ end
 
 local function AttachOpponentAnimator(player, character, animator)
     if not animationDetectionEnabled
+        or not matchIsActive
         or not IsOpponentCharacter(player, character)
         or not animator:IsA("Animator")
         or animationAnimatorConnections[animator] then
@@ -279,17 +283,56 @@ local function AttachOpponentCharacter(player, character)
 end
 
 local function AttachOpponentPlayer(player)
-    if not animationDetectionEnabled or player == LocalPlayer or animationPlayerConnections[player] then
+    if not animationDetectionEnabled or player == LocalPlayer then
         return
     end
 
-    animationPlayerConnections[player] = player.CharacterAdded:Connect(function(character)
-        AttachOpponentCharacter(player, character)
-    end)
+    if not animationPlayerConnections[player] then
+        animationPlayerConnections[player] = player.CharacterAdded:Connect(function(character)
+            if matchIsActive then
+                AttachOpponentCharacter(player, character)
+            end
+        end)
+    end
 
-    if player.Character then
+    if matchIsActive and player.Character then
         AttachOpponentCharacter(player, player.Character)
     end
+end
+
+local function IsMatchTimerVisible()
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then
+        return false, nil
+    end
+
+    for _, object in ipairs(playerGui:GetDescendants()) do
+        if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+            local timerText = tostring(object.Text or ""):gsub("%s+", "")
+            if string.match(timerText, "^%d+:%d%d$") then
+                local visible = object.Visible
+                local ancestor = object.Parent
+
+                while visible and ancestor and ancestor ~= playerGui do
+                    if ancestor:IsA("GuiObject") and not ancestor.Visible then
+                        visible = false
+                        break
+                    end
+                    if ancestor:IsA("ScreenGui") and not ancestor.Enabled then
+                        visible = false
+                        break
+                    end
+                    ancestor = ancestor.Parent
+                end
+
+                if visible then
+                    return true, timerText
+                end
+            end
+        end
+    end
+
+    return false, nil
 end
 
 local function DetachOpponentPlayer(player)
@@ -318,6 +361,13 @@ end
 
 local function StopAnimationDetector()
     animationDetectionEnabled = false
+    matchIsActive = false
+    matchPollElapsed = 0
+
+    if matchPollConnection then
+        matchPollConnection:Disconnect()
+        matchPollConnection = nil
+    end
 
     for _, entry in pairs(animationAnimatorConnections) do
         entry.Connection:Disconnect()
@@ -355,6 +405,9 @@ local function StartAnimationDetector()
     animationDetectionStartedAt = os.clock()
     animationDetectionEnabled = true
 
+    local timerVisible = IsMatchTimerVisible()
+    matchIsActive = timerVisible
+
     for _, player in ipairs(Players:GetPlayers()) do
         AttachOpponentPlayer(player)
     end
@@ -367,8 +420,42 @@ local function StartAnimationDetector()
         DetachOpponentPlayer(player)
     end)
 
+    matchPollConnection = RunService.Heartbeat:Connect(function(deltaTime)
+        if not animationDetectionEnabled then
+            return
+        end
+
+        matchPollElapsed += deltaTime
+        if matchPollElapsed < 0.25 then
+            return
+        end
+        matchPollElapsed = 0
+
+        local timerNowVisible = IsMatchTimerVisible()
+        if timerNowVisible ~= matchIsActive then
+            matchIsActive = timerNowVisible
+
+            if matchIsActive then
+                for _, player in ipairs(Players:GetPlayers()) do
+                    AttachOpponentPlayer(player)
+                end
+                detectorStatusLabel.Text = "Match timer found. Monitoring opponent animations."
+            else
+                for _, player in ipairs(Players:GetPlayers()) do
+                    DetachOpponentPlayer(player)
+                end
+                detectorStatusLabel.Text = "Match timer hidden. Lobby monitoring paused."
+            end
+
+            RefreshAnimationDetectorPanel()
+        end
+    end)
+
     RefreshAnimationDetectorPanel()
-    return true, "Watching other players' replicated character animations."
+    if matchIsActive then
+        return true, "Match timer found. Watching opponent animations."
+    end
+    return true, "Waiting for the match timer to appear."
 end
 
 local function ClassifyLastAnimation(classification)
@@ -632,10 +719,12 @@ RefreshAnimationDetectorPanel = function()
         return
     end
 
-    if animationDetectionEnabled then
-        detectorStatusLabel.Text = "Monitoring visible animations from other players."
+    if not animationDetectionEnabled then
+        detectorStatusLabel.Text = "Stopped | Start to watch opponent animations."
+    elseif matchIsActive then
+        detectorStatusLabel.Text = "Match timer detected | Monitoring opponents."
     else
-        detectorStatusLabel.Text = "Stopped | Start to watch replicated opponent animations."
+        detectorStatusLabel.Text = "Waiting for match timer | Lobby paused."
     end
 
     detectorStartButton.Text = animationDetectionEnabled and "STOP MONITOR" or "START MONITOR"
