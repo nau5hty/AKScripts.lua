@@ -190,16 +190,9 @@ local detectorDragConnections = {}
 local RefreshAnimationDetectorPanel = function() end
 
 -- Read-only HUD monitor state; kept separate from the animation detector.
-local hudMonitorEnabled = false
+local hudMonitorEnabled = true
 local hudMonitorElapsed = 0
-local hudMonitorPanel = nil
-local hudMonitorStatusLabel = nil
-local hudMonitorFighterLabel = nil
-local hudMonitorTimerLabel = nil
-local hudMonitorHPLabel = nil
-local hudMonitorHeartsLabel = nil
-local hudMonitorExtraLabel = nil
-local hudMonitorHistoryLabel = nil
+local hudMonitorParagraph = nil
 local hudMonitorPrevious = nil
 local hudMonitorHistory = {}
 
@@ -1307,31 +1300,55 @@ local function HUDAddHistory(message)
     if hudMonitorHistory[1] == message then
         return
     end
+
     table.insert(hudMonitorHistory, 1, message)
     while #hudMonitorHistory > 3 do
         table.remove(hudMonitorHistory)
     end
-    hudMonitorHistoryLabel.Text = table.concat(hudMonitorHistory, "\n")
+end
+
+local function HUDRenderText(statusText, snapshot)
+    if not hudMonitorParagraph then
+        return
+    end
+
+    local lines = {
+        "STATUS: " .. statusText,
+        "Fighter: " .. (snapshot and snapshot.fighter or "nil"),
+        "Timer: " .. (snapshot and snapshot.timer or "nil"),
+        "HP: " .. (snapshot and snapshot.hp[1] or "nil")
+            .. " / " .. (snapshot and snapshot.hp[2] or "nil"),
+        "Hearts: " .. (snapshot and (
+            tostring(snapshot.heartsLeft or "nil") .. " / "
+            .. tostring(snapshot.heartsRight or "nil")
+        ) or "nil"),
+        "Other HUD label: " .. (snapshot and snapshot.extra or "nil"),
+        "",
+        "RECENT HUD CHANGES"
+    }
+
+    if #hudMonitorHistory == 0 then
+        table.insert(lines, "No recent changes.")
+    else
+        for _, eventText in ipairs(hudMonitorHistory) do
+            table.insert(lines, eventText)
+        end
+    end
+
+    hudMonitorParagraph:Set(table.concat(lines, "\n"))
 end
 
 local function HUDClearValues()
-    hudMonitorStatusLabel.Text = "LOBBY | VALUES NIL"
-    hudMonitorStatusLabel.BackgroundColor3 = Color3.fromRGB(43, 49, 61)
-    hudMonitorFighterLabel.Text = "Fighter: nil"
-    hudMonitorTimerLabel.Text = "Timer: nil"
-    hudMonitorHPLabel.Text = "HUD HP: nil / nil"
-    hudMonitorHeartsLabel.Text = "Hearts: nil"
-    hudMonitorExtraLabel.Text = "Other HUD label: nil"
-
     if hudMonitorPrevious then
         hudMonitorPrevious = nil
         hudMonitorHistory = {}
-        hudMonitorHistoryLabel.Text = "Waiting for match data..."
     end
+
+    HUDRenderText("LOBBY | VALUES NIL", nil)
 end
 
 local function HUDRefresh()
-    if not hudMonitorPanel then
+    if not hudMonitorParagraph then
         return
     end
 
@@ -1345,35 +1362,20 @@ local function HUDRefresh()
         return
     end
 
-    hudMonitorStatusLabel.Text = "MATCH HUD DETECTED"
-    hudMonitorStatusLabel.BackgroundColor3 = Color3.fromRGB(35, 91, 67)
-    hudMonitorFighterLabel.Text = "Fighter: " .. snapshot.fighter
-    hudMonitorTimerLabel.Text = "Timer: " .. (snapshot.timer or "nil")
-    hudMonitorHPLabel.Text = "HUD HP: " .. (snapshot.hp[1] or "nil")
-        .. " / " .. (snapshot.hp[2] or "nil")
-
-    if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
-        hudMonitorHeartsLabel.Text = "Hearts: " .. tostring(snapshot.heartsLeft or "nil")
-            .. " / " .. tostring(snapshot.heartsRight or "nil")
-    else
-        hudMonitorHeartsLabel.Text = "Hearts: nil"
-    end
-
-    hudMonitorExtraLabel.Text = "Other HUD label: " .. (snapshot.extra or "nil")
-
     if not hudMonitorPrevious then
         hudMonitorHistory = {}
-        hudMonitorHistoryLabel.Text = "Match data detected."
         HUDAddHistory("Match detected | " .. snapshot.fighter)
     else
         if snapshot.fighter ~= hudMonitorPrevious.fighter then
             HUDAddHistory("Fighter: " .. snapshot.fighter)
         end
+
         if snapshot.hp[1] ~= hudMonitorPrevious.hp[1]
             or snapshot.hp[2] ~= hudMonitorPrevious.hp[2] then
             HUDAddHistory("HP: " .. (snapshot.hp[1] or "nil")
                 .. " / " .. (snapshot.hp[2] or "nil"))
         end
+
         if snapshot.heartsLeft ~= hudMonitorPrevious.heartsLeft
             or snapshot.heartsRight ~= hudMonitorPrevious.heartsRight then
             if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
@@ -1384,82 +1386,10 @@ local function HUDRefresh()
     end
 
     hudMonitorPrevious = snapshot
+    HUDRenderText("MATCH HUD DETECTED", snapshot)
 end
 
-local function CreateHUDMonitorPanel()
-    if hudMonitorPanel then
-        return
-    end
 
-    hudMonitorPanel = Instance.new("Frame")
-    hudMonitorPanel.Name = "OpponentHUDMonitorPanel"
-    hudMonitorPanel.Size = UDim2.fromOffset(320, 225)
-    hudMonitorPanel.Position = UDim2.new(1, -334, 1, -240)
-    hudMonitorPanel.BackgroundColor3 = Color3.fromRGB(19, 21, 27)
-    hudMonitorPanel.BorderSizePixel = 0
-    hudMonitorPanel.Visible = false
-    hudMonitorPanel.Parent = ProtectedGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
-    corner.Parent = hudMonitorPanel
-
-    local outline = Instance.new("UIStroke")
-    outline.Color = Color3.fromRGB(74, 82, 99)
-    outline.Thickness = 1
-    outline.Parent = hudMonitorPanel
-
-    local title = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Title", "AXScripts | Opponent HUD Monitor",
-        UDim2.fromOffset(10, 6), UDim2.new(1, -20, 0, 22), 12
-    )
-    title.Font = Enum.Font.GothamBold
-
-    hudMonitorStatusLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Status", "LOBBY | VALUES NIL",
-        UDim2.fromOffset(10, 32), UDim2.new(1, -20, 0, 20), 10
-    )
-    hudMonitorStatusLabel.BackgroundColor3 = Color3.fromRGB(43, 49, 61)
-    hudMonitorStatusLabel.BackgroundTransparency = 0
-    hudMonitorStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-    hudMonitorFighterLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Fighter", "Fighter: nil",
-        UDim2.fromOffset(10, 58), UDim2.new(1, -20, 0, 18), 11
-    )
-    hudMonitorTimerLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Timer", "Timer: nil",
-        UDim2.fromOffset(10, 78), UDim2.new(1, -20, 0, 18), 11
-    )
-    hudMonitorHPLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "HP", "HUD HP: nil / nil",
-        UDim2.fromOffset(10, 98), UDim2.new(1, -20, 0, 18), 11
-    )
-    hudMonitorHeartsLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Hearts", "Hearts: nil",
-        UDim2.fromOffset(10, 118), UDim2.new(1, -20, 0, 18), 11
-    )
-    hudMonitorExtraLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Extra", "Other HUD label: nil",
-        UDim2.fromOffset(10, 138), UDim2.new(1, -20, 0, 18), 11
-    )
-
-    local recentTitle = CreateDetectorPanelLabel(
-        hudMonitorPanel, "RecentTitle", "RECENT HUD CHANGES",
-        UDim2.fromOffset(10, 160), UDim2.new(1, -20, 0, 14), 9
-    )
-    recentTitle.Font = Enum.Font.GothamBold
-    recentTitle.TextColor3 = Color3.fromRGB(153, 173, 201)
-
-    hudMonitorHistoryLabel = CreateDetectorPanelLabel(
-        hudMonitorPanel, "Recent", "Waiting for match data...",
-        UDim2.fromOffset(10, 176), UDim2.new(1, -20, 0, 42), 9
-    )
-    hudMonitorHistoryLabel.Font = Enum.Font.Code
-    hudMonitorHistoryLabel.TextYAlignment = Enum.TextYAlignment.Top
-end
-
-CreateHUDMonitorPanel()
 
 local function CountPracticeDummies()
     local count = 0
@@ -1643,13 +1573,13 @@ local buildOk, buildError = xpcall(function()
     })
 
     AutoFightSection:CreateToggle({
-        Name = "Smart Block (configuration only)",
+        Name = "Auto Block (practice only - not connected)",
         Default = false,
         Callback = function(state)
             smartBlockEnabled = state
             LucidUI:Notify({
                 Title = "Auto Fight",
-                Message = state and "Smart Block setting enabled (not connected)." or "Smart Block setting disabled."
+                Message = state and "Practice-only setting saved. No blocking action is connected; an official practice-NPC adapter is required." or "Auto Block setting disabled."
             })
         end,
     })
@@ -1733,34 +1663,15 @@ local buildOk, buildError = xpcall(function()
 
     local HUDMonitorSection = FarmTab:CreateSection({Name = "Opponent HUD Monitor (Read Only)"})
 
-    HUDMonitorSection:CreateToggle({
-        Name = "Enable HUD Monitor",
-        Default = false,
-        Callback = function(state)
-            hudMonitorEnabled = state
-            hudMonitorElapsed = 1
-
-            if hudMonitorPanel then
-                hudMonitorPanel.Visible = state
-            end
-
-            if state then
-                HUDRefresh()
-                LucidUI:Notify({
-                    Title = "HUD Monitor",
-                    Message = "Read-only HUD monitoring enabled. Values remain nil in the lobby."
-                })
-            else
-                if hudMonitorStatusLabel then
-                    HUDClearValues()
-                end
-                LucidUI:Notify({
-                    Title = "HUD Monitor",
-                    Message = "HUD monitoring disabled."
-                })
-            end
-        end,
+    hudMonitorParagraph = HUDMonitorSection:CreateParagraph({
+        Text = "STATUS: LOBBY | VALUES NIL\nFighter: nil\nTimer: nil\nHP: nil / nil\nHearts: nil\nOther HUD label: nil\n\nRECENT HUD CHANGES\nNo recent changes.",
+        TextSize = 11,
+        PaddingX = 6,
+        PaddingY = 6
     })
+    hudMonitorEnabled = true
+    HUDRefresh()
+
 
     FarmSection:CreateSlider({
         Name = "Practice Range",
