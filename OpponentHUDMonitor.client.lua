@@ -30,7 +30,7 @@ screen.Parent = PlayerGui
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Size = UDim2.fromOffset(330, 258)
-panel.Position = UDim2.new(1, -348, 0, 90)
+panel.Position = UDim2.new(0, 16, 1, -276)
 panel.BackgroundColor3 = Color3.fromRGB(19, 21, 27)
 panel.BorderSizePixel = 0
 panel.Parent = screen
@@ -204,13 +204,13 @@ local function getMatchSnapshot()
             and isVisible(object) and isTopRight(object) then
 
             local value = cleanText(object.Text)
-            local name = string.lower(object.Name)
+            local objectName = string.lower(object.Name)
 
-            if isTimerText(value) or (name == "time" and isTimerText(value)) then
+            if isTimerText(value) then
                 table.insert(timerCandidates, {
                     object = object,
                     value = value,
-                    score = (name == "time" and 5 or 0)
+                    score = objectName == "time" and 5 or 0
                 })
             end
         end
@@ -221,112 +221,92 @@ local function getMatchSnapshot()
     end
 
     local best = nil
-    for _, timerCandidate in ipairs(timerCandidates) do
-        local timerObject = timerCandidate.object
-        local snapshot = {
-            timer = timerCandidate.value,
-            fighter = nil,
-            hp = {},
-            heartsLeft = nil,
-            heartsRight = nil,
-            extra = nil,
-            score = timerCandidate.score
-        }
 
-        local nameCandidates = {}
-        local hpCandidates = {}
-        local extraCandidates = {}
-        local leftHearts = nil
-        local rightHearts = nil
-
-        for _, object in ipairs(timerObject.Parent.Parent:GetDescendants()) do
-            if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
-                and nearbySameScope(object, timerObject) then
-
-                local objectName = string.lower(object.Name)
-                local raw = tostring(object.Text or "")
-                local value = cleanText(raw)
-
-                if objectName == "name" and value ~= "" and not isTimerText(value) then
-                    table.insert(nameCandidates, {value = value, object = object})
-                elseif objectName == "hpnum" and tonumber(value) then
-                    table.insert(hpCandidates, {value = value, object = object})
-                elseif objectName == "heartsl" and value ~= "" then
-                    leftHearts = countHearts(raw)
-                elseif objectName == "heartsr" and value ~= "" then
-                    rightHearts = countHearts(raw)
-                elseif objectName == "label" and value ~= "" then
-                    table.insert(extraCandidates, value)
-                end
-            end
-        end
-
-        -- Some ScreenGuis use nested containers. If the timer's parent chain
-        -- does not expose the ScreenGui, scan that ScreenGui directly.
+    for _, candidate in ipairs(timerCandidates) do
+        local timerObject = candidate.object
         local root = getScreenGui(timerObject)
+
         if root then
+            local snapshot = {
+                timer = candidate.value,
+                fighter = nil,
+                hp = {},
+                heartsLeft = nil,
+                heartsRight = nil,
+                extra = nil,
+                score = candidate.score
+            }
+
+            local nameCandidates = {}
+            local hpCandidates = {}
+            local extraCandidates = {}
+
             for _, object in ipairs(root:GetDescendants()) do
                 if (object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox"))
+                    and object ~= timerObject
                     and nearbySameScope(object, timerObject) then
+
                     local objectName = string.lower(object.Name)
                     local raw = tostring(object.Text or "")
                     local value = cleanText(raw)
 
                     if objectName == "name" and value ~= "" and not isTimerText(value) then
-                        local exists = false
-                        for _, item in ipairs(nameCandidates) do
-                            if item.object == object then exists = true break end
-                        end
-                        if not exists then table.insert(nameCandidates, {value = value, object = object}) end
+                        table.insert(nameCandidates, {value = value, object = object})
                     elseif objectName == "hpnum" and tonumber(value) then
-                        local exists = false
-                        for _, item in ipairs(hpCandidates) do
-                            if item.object == object then exists = true break end
-                        end
-                        if not exists then table.insert(hpCandidates, {value = value, object = object}) end
+                        table.insert(hpCandidates, {value = value, object = object})
                     elseif objectName == "heartsl" and value ~= "" then
-                        leftHearts = countHearts(raw)
+                        snapshot.heartsLeft = countHearts(raw)
                     elseif objectName == "heartsr" and value ~= "" then
-                        rightHearts = countHearts(raw)
+                        snapshot.heartsRight = countHearts(raw)
                     elseif objectName == "label" and value ~= "" then
-                        table.insert(extraCandidates, value)
+                        table.insert(extraCandidates, {value = value, object = object})
                     end
                 end
             end
-        end
 
-        table.sort(nameCandidates, function(a, b)
-            return (a.object.AbsolutePosition - timerObject.AbsolutePosition).Magnitude
-                < (b.object.AbsolutePosition - timerObject.AbsolutePosition).Magnitude
-        end)
-        table.sort(hpCandidates, function(a, b)
-            local ap = a.object.AbsolutePosition
-            local bp = b.object.AbsolutePosition
-            if ap.Y == bp.Y then return ap.X < bp.X end
-            return ap.Y < bp.Y
-        end)
+            table.sort(nameCandidates, function(a, b)
+                return (a.object.AbsolutePosition - timerObject.AbsolutePosition).Magnitude
+                    < (b.object.AbsolutePosition - timerObject.AbsolutePosition).Magnitude
+            end)
 
-        if nameCandidates[1] then
-            snapshot.fighter = nameCandidates[1].value
-            snapshot.score = snapshot.score + 10
-        end
+            table.sort(hpCandidates, function(a, b)
+                local ap = a.object.AbsolutePosition
+                local bp = b.object.AbsolutePosition
+                if ap.Y == bp.Y then
+                    return ap.X < bp.X
+                end
+                return ap.Y < bp.Y
+            end)
 
-        for index = 1, math.min(#hpCandidates, 2) do
-            table.insert(snapshot.hp, hpCandidates[index].value)
-        end
+            table.sort(extraCandidates, function(a, b)
+                return (a.object.AbsolutePosition - timerObject.AbsolutePosition).Magnitude
+                    < (b.object.AbsolutePosition - timerObject.AbsolutePosition).Magnitude
+            end)
 
-        if #snapshot.hp >= 2 then
-            snapshot.score = snapshot.score + 4
-        elseif #snapshot.hp == 1 then
-            snapshot.score = snapshot.score + 1
-        end
+            if nameCandidates[1] then
+                snapshot.fighter = nameCandidates[1].value
+                snapshot.score = snapshot.score + 10
+            end
 
-        snapshot.heartsLeft = leftHearts
-        snapshot.heartsRight = rightHearts
-        snapshot.extra = extraCandidates[1]
+            for index = 1, math.min(#hpCandidates, 2) do
+                table.insert(snapshot.hp, hpCandidates[index].value)
+            end
 
-        if snapshot.score > (best and best.score or -1) then
-            best = snapshot
+            if #snapshot.hp >= 2 then
+                snapshot.score = snapshot.score + 4
+            elseif #snapshot.hp == 1 then
+                snapshot.score = snapshot.score + 1
+            end
+
+            if snapshot.heartsLeft ~= nil or snapshot.heartsRight ~= nil then
+                snapshot.score = snapshot.score + 2
+            end
+
+            snapshot.extra = extraCandidates[1] and extraCandidates[1].value or nil
+
+            if snapshot.score > (best and best.score or -1) then
+                best = snapshot
+            end
         end
     end
 
