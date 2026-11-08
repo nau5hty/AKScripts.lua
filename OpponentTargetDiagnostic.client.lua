@@ -448,6 +448,113 @@ local function getNearbyCharacters()
     return found
 end
 
+
+local function getOwnDuelStandSummary()
+    local hub = Workspace:FindFirstChild("Hub")
+    local standsFolder = hub and hub:FindFirstChild("Stands")
+    if not standsFolder then
+        return {"Hub.Stands folder not found."}
+    end
+
+    local myNames = {
+        [string.lower(LocalPlayer.Name)] = true
+    }
+    if LocalPlayer.DisplayName and LocalPlayer.DisplayName ~= "" then
+        myNames[string.lower(LocalPlayer.DisplayName)] = true
+    end
+
+    local localRoot = LocalPlayer.Character and findModelRoot(LocalPlayer.Character)
+    local standRows = {}
+
+    for _, stand in ipairs(standsFolder:GetChildren()) do
+        if stand:IsA("Model") or stand:IsA("Folder") then
+            local labels = {}
+            local containsMe = false
+
+            for _, object in ipairs(stand:GetDescendants()) do
+                if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+                    local value = tostring(object.Text or ""):gsub("[%c]", " ")
+                    value = value:gsub("^%s+", ""):gsub("%s+$", "")
+                    local normalized = string.lower(value)
+
+                    if myNames[normalized] then
+                        containsMe = true
+                    end
+
+                    local labelName = object.Name
+                    local usefulLabel = labelName == "Name"
+                        or labelName == "Initial"
+                        or labelName == "InitialM"
+                        or labelName == "HeartsL"
+                        or labelName == "HeartsR"
+                        or labelName == "Mid"
+                        or labelName == "Sub"
+                        or labelName == "Pick"
+                        or labelName == "Title"
+                        or labelName == "Wait"
+
+                    if usefulLabel and value ~= "" and #labels < 12 then
+                        table.insert(labels, labelName .. "=" .. value)
+                    end
+                end
+            end
+
+            local distance = math.huge
+            if localRoot and stand:IsA("Model") then
+                local ok, pivot = pcall(function()
+                    return stand:GetPivot()
+                end)
+                if ok and pivot then
+                    distance = (pivot.Position - localRoot.Position).Magnitude
+                end
+            end
+
+            table.insert(standRows, {
+                name = stand.Name,
+                containsMe = containsMe,
+                distance = distance,
+                labels = labels
+            })
+        end
+    end
+
+    table.sort(standRows, function(a, b)
+        if a.containsMe ~= b.containsMe then
+            return a.containsMe
+        end
+        return a.distance < b.distance
+    end)
+
+    local lines = {}
+    table.insert(lines, "Your username: " .. LocalPlayer.Name)
+    table.insert(lines, "Your display name: " .. tostring(LocalPlayer.DisplayName))
+    table.insert(lines, "Stands containing your name are listed first.")
+
+    if #standRows == 0 then
+        table.insert(lines, "No stand entries found.")
+    else
+        for index = 1, math.min(#standRows, 5) do
+            local row = standRows[index]
+            local distanceText = row.distance < math.huge
+                and string.format("%.0f studs", row.distance)
+                or "distance unavailable"
+
+            local marker = row.containsMe and " [MATCHES YOU]" or ""
+            table.insert(lines, row.name .. marker .. " | " .. distanceText)
+
+            if #row.labels == 0 then
+                table.insert(lines, "  No participant labels found.")
+            else
+                for _, labelText in ipairs(row.labels) do
+                    table.insert(lines, "  " .. labelText)
+                end
+            end
+        end
+    end
+
+    return lines
+end
+
 local function refresh()
     local lines = {}
     table.insert(lines, "READ-ONLY DIAGNOSTIC - no combat actions")
@@ -484,6 +591,13 @@ local function refresh()
         if #overheadEntries > 15 then
             table.insert(lines, "  ... plus " .. tostring(#overheadEntries - 15) .. " more labels.")
         end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "YOUR DUEL STAND CHECK:")
+    local standLines = getOwnDuelStandSummary()
+    for _, standLine in ipairs(standLines) do
+        table.insert(lines, "  " .. standLine)
     end
 
     table.insert(lines, "")
