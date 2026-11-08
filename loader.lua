@@ -1468,9 +1468,12 @@ local monitorConnection = RunService.Heartbeat:Connect(function(deltaTime)
         if hudMonitorElapsed >= 0.3 then
             hudMonitorElapsed = 0
             local ok, err = pcall(HUDRefresh)
-            if not ok and hudMonitorStatusLabel then
-                hudMonitorStatusLabel.Text = "HUD READ ERROR"
-                hudMonitorStatusLabel.TextColor3 = Color3.fromRGB(255, 130, 130)
+            if not ok then
+                if hudMonitorParagraph then
+                    hudMonitorParagraph:Set(
+                        "STATUS: HUD READ ERROR\\n" .. tostring(err)
+                    )
+                end
                 warn("[AXScripts HUD Monitor] " .. tostring(err))
             end
         end
