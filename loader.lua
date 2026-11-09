@@ -1924,6 +1924,16 @@ end
 
 SetDiagnostic("UI loaded successfully")
 
+-- Start the read-only animation monitor automatically. It waits for the match
+-- HUD clock, attaches while a match is active, and pauses again in the lobby.
+local monitorCallOk, monitorStarted, monitorStatus = pcall(StartAnimationDetector)
+if monitorCallOk and monitorStarted then
+    print("[AXScripts Animation Monitor] " .. tostring(monitorStatus))
+else
+    warn("[AXScripts Animation Monitor] Start failed: "
+        .. tostring(monitorCallOk and monitorStatus or monitorStarted))
+end
+
 -- Clean up background work when this loader is replaced.
 local previousCleanup = _G.AKScriptsLoaded
 _G.AKScriptsLoaded = function()
